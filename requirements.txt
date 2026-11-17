@@ -1,3 +1,6 @@
 fastapi[standard]
 pydantic
 websockets
+litellm
+pyyaml
+python-dotenv

@@ -18,24 +18,10 @@ class ConnectionManager:
             del self.active_connections[client_id]
             print(f"[RGS Hub] Client disconnected: {client_id}")
 
-    async def send_to_client(self, client_id: str, message: dict):
-        """Sends a direct JSON message to a specific client."""
-        if client_id in self.active_connections:
-            await self.active_connections[client_id].send_json(message)
-
     async def route_message(self, sender_id: str, data: dict):
-        """
-        Routes a message based on a 'recipient' field inside the incoming JSON payload.
-        Expected format example:
-        {
-            "recipient": "faulkner",
-            "action": "execute_command",
-            "payload": {"command": "ls -la"}
-        }
-        """
+        """Routes a message based on a 'recipient' field inside the incoming JSON payload."""
         recipient = data.get("recipient")
         if recipient and recipient in self.active_connections:
-            # Inject sender metadata so the recipient knows who sent the instruction
             data["sender"] = sender_id
             await self.active_connections[recipient].send_json(data)
             print(f"[RGS Hub] Routed message from '{sender_id}' to '{recipient}'")
