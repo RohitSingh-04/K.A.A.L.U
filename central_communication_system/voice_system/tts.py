@@ -1,9 +1,17 @@
 import json
+import pathlib
 import re
 import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+# Fix for Linux checkpoints loaded on Windows
+if hasattr(pathlib, "PosixPath"):
+    try:
+        pathlib.PosixPath = pathlib.WindowsPath
+    except Exception:
+        pass
 import sounddevice as sd
 from piper import PiperVoice, SynthesisConfig
 
@@ -65,8 +73,12 @@ class VoiceEngine:
         self.voice_name = None
         self.model_config = None
 
-        if default_voice and (self.models_dir / default_voice).exists():
-            self.set_voice(default_voice)
+        if default_voice:
+            voice_dir = self.models_dir / default_voice
+            if voice_dir.exists() and list(voice_dir.glob("*.onnx")):
+                self.set_voice(default_voice)
+            elif (self.models_dir / "jarvis").exists() and list((self.models_dir / "jarvis").glob("*.onnx")):
+                self.set_voice("jarvis")
 
     def set_voice(self, name: str):
         """Load a pretrained or custom Piper ONNX voice."""
@@ -90,18 +102,59 @@ class VoiceEngine:
         self.voice_name = name
         print(f"Loaded voice: {name}")
 
-    def train_voice(self, name: str, dataset_dir: str, checkpoint_path: str = None, language="en-us", sample_rate=22050, epochs=1000, batch_size=4):
-        """Fine-tune or export a custom Piper voice model from dataset."""
+    def train_voice(self, name: str, dataset_dir: str = None, checkpoint_path: str = None, language="en-us", sample_rate=22050, epochs=1000, batch_size=4):
+        """Fine-tune and export a custom Piper ONNX voice model from a dataset. Only 'name' is required."""
+        if dataset_dir is None:
+            dataset_candidates = [
+                Path(__file__).resolve().parent / "datasets" / name,
+                Path.cwd() / "central_communication_system" / "voice_system" / "datasets" / name,
+                Path.cwd() / "voice_system" / "datasets" / name,
+                Path.cwd() / "datasets" / name
+            ]
+            for candidate in dataset_candidates:
+                if candidate.exists():
+                    dataset_dir = candidate
+                    break
+            if dataset_dir is None:
+                dataset_dir = Path(__file__).resolve().parent / "datasets" / name
+
         dataset_dir = Path(dataset_dir)
         if not dataset_dir.is_absolute() and not dataset_dir.exists():
-            alt_dir = Path(__file__).resolve().parent / dataset_dir
-            if alt_dir.exists():
-                dataset_dir = alt_dir
+            for parent in (Path(__file__).resolve().parent, Path.cwd(), Path(__file__).resolve().parents[2]):
+                alt_dir = parent / dataset_dir
+                if alt_dir.exists():
+                    dataset_dir = alt_dir
+                    break
 
         metadata = dataset_dir / "metadata.csv"
         wav_dir = dataset_dir / "wav"
         if not metadata.exists() or not wav_dir.exists():
             raise FileNotFoundError("Dataset must contain metadata.csv and wav/")
+
+        has_piper_train = shutil.which("piper_train") is not None
+        try:
+            import piper_train
+            has_piper_train = True
+        except ImportError:
+            pass
+
+        if not has_piper_train:
+            raise RuntimeError("piper_train module not found. Install Piper training tools or use the Colab/local training script.")
+
+        if not checkpoint_path:
+            ckpt_candidates = (
+                list(self.models_dir.glob("checkpoints/*.ckpt"))
+                + list(self.models_dir.glob("*.ckpt"))
+                + list((Path.home() / ".cache" / "huggingface").glob("**/*.ckpt"))
+            )
+            if ckpt_candidates:
+                checkpoint_path = str(ckpt_candidates[0])
+            else:
+                raise FileNotFoundError("Base checkpoint (.ckpt) required for fine-tuning. Provide checkpoint_path or place a .ckpt in models/checkpoints/.")
+
+        checkpoint_path = Path(checkpoint_path)
+        if not checkpoint_path.exists():
+            raise FileNotFoundError(f"Checkpoint file not found: {checkpoint_path}")
 
         output_dir = self.models_dir / name
         training_dir = output_dir / "training"
@@ -111,55 +164,17 @@ class VoiceEngine:
         model_path = output_dir / f"{name}.onnx"
         config_destination = Path(str(model_path) + ".json")
 
-        has_piper_train = shutil.which("piper_train") is not None
-        try:
-            import piper_train
-            has_piper_train = True
-        except ImportError:
-            pass
-
-        if has_piper_train and checkpoint_path and Path(checkpoint_path).exists():
-            checkpoint_path = Path(checkpoint_path)
-            subprocess.run([sys.executable, "-m", "piper_train.preprocess", "--language", language, "--input-dir", str(dataset_dir), "--output-dir", str(training_dir), "--dataset-format", "ljspeech", "--single-speaker", "--sample-rate", str(sample_rate)], check=True)
-            subprocess.run([sys.executable, "-m", "piper_train", "--dataset-dir", str(training_dir), "--accelerator", "gpu" if self.use_cuda else "cpu", "--devices", "1", "--batch-size", str(batch_size), "--validation-split", "0.0", "--num-test-examples", "0", "--max_epochs", str(epochs), "--resume_from_checkpoint", str(checkpoint_path), "--checkpoint-epochs", "1", "--precision", "32"], check=True)
-            checkpoints = list(training_dir.glob("lightning_logs/version_*/checkpoints/*.ckpt"))
-            if not checkpoints:
-                raise FileNotFoundError("Traning completed but no checkpoint was found.")
-            latest_checkpoint = max(checkpoints, key=lambda p: p.stat().st_mtime)
-            subprocess.run([sys.executable, "-m", "piper_train.export_onnx", str(latest_checkpoint), str(model_path)], check=True)
-            config_source = training_dir / "config.json"
-            if not config_source.exists():
-                raise FileNotFoundError("Training configuration not found.")
-            shutil.copy2(config_source, config_destination)
-        else:
-            base_model = self.models_dir / "jarvis" / "en_US-Jarvis_Real-medium.onnx"
-            base_config = Path(str(base_model) + ".json")
-            if not base_model.exists():
-                onnx_candidates = list(self.models_dir.glob("*/*.onnx"))
-                if onnx_candidates:
-                    base_model = onnx_candidates[0]
-                    base_config = Path(str(base_model) + ".json")
-
-            if base_model.exists() and not model_path.exists():
-                shutil.copy2(base_model, model_path)
-
-            base_data = {}
-            if base_config.exists():
-                with open(base_config, "r", encoding="utf-8") as f:
-                    base_data = json.load(f)
-
-            tony_config = dict(base_data)
-            tony_config["dataset"] = f"en_US-{name}"
-            tony_config.setdefault("audio", {})["quality"] = f"real_{name}"
-            tony_config.setdefault("language", {})["code"] = "en_US"
-            tony_config["inference"] = {
-                "noise_scale": 0.55,
-                "length_scale": 0.95,
-                "noise_w": 0.75
-            }
-
-            with open(config_destination, "w", encoding="utf-8") as f:
-                json.dump(tony_config, f, indent=4)
+        subprocess.run([sys.executable, "-m", "piper_train.preprocess", "--language", language, "--input-dir", str(dataset_dir), "--output-dir", str(training_dir), "--dataset-format", "ljspeech", "--single-speaker", "--sample-rate", str(sample_rate)], check=True)
+        subprocess.run([sys.executable, "-m", "piper_train", "--dataset-dir", str(training_dir), "--accelerator", "gpu" if self.use_cuda else "cpu", "--devices", "1", "--batch-size", str(batch_size), "--validation-split", "0.0", "--num-test-examples", "0", "--max_epochs", str(epochs), "--resume_from_checkpoint", str(checkpoint_path), "--checkpoint-epochs", "1", "--precision", "32"], check=True)
+        checkpoints = list(training_dir.glob("lightning_logs/version_*/checkpoints/*.ckpt"))
+        if not checkpoints:
+            raise FileNotFoundError("Traning completed but no checkpoint was found.")
+        latest_checkpoint = max(checkpoints, key=lambda p: p.stat().st_mtime)
+        subprocess.run([sys.executable, "-m", "piper_train.export_onnx", str(latest_checkpoint), str(model_path)], check=True)
+        config_source = training_dir / "config.json"
+        if not config_source.exists():
+            raise FileNotFoundError("Training configuration not found.")
+        shutil.copy2(config_source, config_destination)
 
         print(f"\nVoice training completed: {name}")
         self.set_voice(name)
@@ -200,6 +215,13 @@ class VoiceEngine:
 
 
 # Initialize default Speaker instance
+def _is_valid_voice_dir(voice_dir: Path) -> bool:
+    if not voice_dir.exists():
+        return False
+    onnx_files = list(voice_dir.glob("*.onnx"))
+    return bool(onnx_files and Path(str(onnx_files[0]) + ".json").exists())
+
 _models_dir = Path(__file__).resolve().parent / "models"
-_default_voice = "tony" if (_models_dir / "tony").exists() else "jarvis"
+_has_tony = _is_valid_voice_dir(_models_dir / "tony")
+_default_voice = "tony" if _has_tony else "jarvis"
 Speaker = VoiceEngine(models_dir=_models_dir, default_voice=_default_voice)
