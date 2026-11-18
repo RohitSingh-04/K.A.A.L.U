@@ -1,44 +1,306 @@
 import asyncio
-from langchain_community.chat_models import ChatOllama
-from langchain.agents import AgentExecutor, create_tool_calling_agent
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-
-from kaalu_orchestrator.prompts import KAALU_SYSTEM_PROMPT
-from kaalu_orchestrator.tools import dispatch_to_faulkner, dispatch_to_david, ws_client
-
-async def run_kaalu_orchestrator(goal: str):
-    """Initializes the local Ollama reasoning engine and runs the autonomous agent loop."""
-    # 1. Ensure WebSocket connection to RGS Hub is open
-    await ws_client.connect_server()
-
-    # 2. Initialize local model via Ollama (ensure Ollama is running locally)
-    llm = ChatOllama(model="qwen2.5", temperature=0)
-
-    # 3. Register tools available to Kaalu
-    tools = [dispatch_to_faulkner, dispatch_to_david]
-
-    # 4. Build chat prompt structure with system instructions and workspace memory
-    prompt = ChatPromptTemplate.from_messages([
-        ("system", KAALU_SYSTEM_PROMPT),
-        MessagesPlaceholder("chat_history", optional=True),
-        ("human", "{input}"),
-        MessagesPlaceholder("agent_scratchpad"),
-    ])
-
-    # 5. Create tool-calling agent and executor
-    agent = create_tool_calling_agent(llm, tools, prompt)
-    agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=True)
-
-    print(f"\n[Kaalu Brain] Initialized goal execution: '{goal}'")
-    
+import json
+import re
+import sys
+from typing import Any, Dict, List, Optional
+try:
+    from voice_system.tts import Speaker
+except (ImportError, ValueError):
     try:
-        # Run the agent execution loop asynchronously
-        response = await agent_executor.ainvoke({"input": goal})
-        print(f"\n[Kaalu Brain] Goal execution finished.\nResult: {response['output']}")
-    except Exception as e:
-        print(f"\n[Kaalu Error] Execution failed: {e}")
+        from ..voice_system.tts import Speaker
+    except (ImportError, ValueError):
+        try:
+            from central_communication_system.voice_system.tts import Speaker
+        except (ImportError, ValueError):
+            Speaker = None
+from kaalu_orchestrator.prompts import KAALU_SYSTEM_PROMPT
+from kaalu_orchestrator.ws_client import KaaluWSClient
+from kaalu_orchestrator.rgs_llm_client import RGSLLMClient
+
+class KaaluOrchestrator:
+    """
+    Main user-facing orchestrator agent for Project Kaalu.
+    Coordinates multi-step objectives by consulting the RGS Central LLM Gateway
+    and delegating concrete actions to Faulkner (system/terminal) and David (browser).
+    Maintains cross-turn conversation memory for multi-goal contextual continuity.
+    """
+    def __init__(
+        self,
+        ws_uri: str = "ws://localhost:8000/ws/kaalu",
+        gateway_url: str = "http://localhost:8000/llm/generate",
+        max_steps: int = 15,
+        max_history_turns: int = 10
+    ):
+        self.llm_client = RGSLLMClient(gateway_url=gateway_url)
+        self.ws_client = KaaluWSClient(uri=ws_uri)
+        self.max_steps = max_steps
+        self.conversation_history: List[Dict[str, str]] = []
+        self.max_history_turns = max_history_turns
+
+    def reset_session(self):
+        """Clear multi-turn session history."""
+        self.conversation_history.clear()
+        print("[Kaalu] Session memory cleared.")
+
+    @staticmethod
+    def _extract_json(text: str) -> Optional[Dict[str, Any]]:
+        """
+        Robustly extracts and parses a JSON object from raw LLM output,
+        handling markdown fences and surrounding conversational prose.
+        """
+        if not text:
+            return None
+
+        clean_text = text.strip()
+
+        # 1. Check for markdown code fences (```json ... ``` or ``` ... ```)
+        fence_match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", clean_text, re.IGNORECASE)
+        if fence_match:
+            candidate = fence_match.group(1).strip()
+            try:
+                return json.loads(candidate)
+            except json.JSONDecodeError:
+                pass
+
+        # 2. Try direct json.loads
+        try:
+            return json.loads(clean_text)
+        except json.JSONDecodeError:
+            pass
+
+        # 3. Locate outer-most curly braces { ... }
+        start_idx = clean_text.find("{")
+        end_idx = clean_text.rfind("}")
+        if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
+            candidate = clean_text[start_idx:end_idx + 1]
+            try:
+                return json.loads(candidate)
+            except json.JSONDecodeError:
+                pass
+
+        return None
+
+    async def process_user_goal(self, goal: str) -> Dict[str, Any]:
+        """
+        Processes a high-level user goal using the RGS Central Intelligence
+        and agent delegation ReAct loop (Think -> Act -> Observe).
+        Maintains awareness of previous goals, directory listings, and file locations.
+        """
+        print(f"\n[Kaalu] Initiating User Objective: '{goal}'")
+
+        # 1. Ensure WebSocket connection to RGS Hub is established
+        await self.ws_client.connect_server()
+
+        # 2. Build conversation context including system prompt and prior chat history
+        messages: List[Dict[str, str]] = [
+            {"role": "system", "content": KAALU_SYSTEM_PROMPT}
+        ]
+
+        # Inject previous conversation turns so Kaalu remembers discovered files, folders, and outputs
+        for prev_turn in self.conversation_history:
+            messages.append(prev_turn)
+
+        # Append current user objective
+        messages.append({
+            "role": "user",
+            "content": (
+                f"User Objective: {goal}\n\n"
+                "Analyze this objective, plan the sequence of actions, and take the first step. "
+                "CRITICAL: Use context, files, paths, and information from previous turns if relevant. "
+                "Respond with a single valid JSON object following the specified protocol."
+            )
+        })
+
+        steps_taken = 0
+
+        # 3. Autonomous Execution Loop
+        while steps_taken < self.max_steps:
+            steps_taken += 1
+            print(f"\n[Kaalu Step {steps_taken}/{self.max_steps}] Requesting reasoning from RGS Central LLM...")
+
+            try:
+                llm_response = await self.llm_client.generate_async(messages=messages)
+            except Exception as llm_err:
+                print(f"[Kaalu Error] LLM generation failed: {llm_err}")
+                return {
+                    "status": "error",
+                    "error": f"LLM Gateway communication failed: {str(llm_err)}",
+                    "steps_taken": steps_taken,
+                    "final_answer": "Failed to communicate with RGS Central LLM Gateway."
+                }
+
+            print(f"[Kaalu Reasoning Output]:\n{llm_response}\n")
+
+            # Parse the structured decision
+            decision = self._extract_json(llm_response)
+
+            if not decision:
+                print("[Kaalu Warning] Could not parse valid JSON from LLM response. Requesting correction...")
+                messages.append({"role": "assistant", "content": llm_response})
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        "Your previous response was not a valid JSON object. "
+                        "Please provide your decision strictly in JSON format as specified: "
+                        "{\"thought\": \"...\", \"action\": \"delegate\" | \"finish\", ...}"
+                    )
+                })
+                continue
+
+            action_type = decision.get("action")
+            thought = decision.get("thought", "")
+
+            # A. Goal Completion
+            if action_type == "finish":
+                final_answer = decision.get("final_answer", "Objective accomplished.")
+                voice_response = decision.get("voice_response") or final_answer
+                print(f"[Kaalu Finish] Objective successfully achieved:\n{final_answer}")
+                if decision.get("voice_response"):
+                    print(f"[Kaalu Voice Response]: {voice_response}")
+
+                # Persist this turn in conversation history for future turns
+                self.conversation_history.append({"role": "user", "content": goal})
+                self.conversation_history.append({"role": "assistant", "content": final_answer})
+
+                # Maintain history within bounded size
+                max_msgs = self.max_history_turns * 2
+                if len(self.conversation_history) > max_msgs:
+                    self.conversation_history = self.conversation_history[-max_msgs:]
+
+                return {
+                    "status": "completed",
+                    "thought": thought,
+                    "final_answer": final_answer,
+                    "voice_response": voice_response,
+                    "steps_taken": steps_taken
+                }
+
+            # B. Sub-Agent Task Delegation
+            elif action_type == "delegate":
+                recipient = decision.get("recipient")
+                task_action = decision.get("task_action")
+                payload = decision.get("payload", {})
+
+                if recipient not in ("faulkner", "david"):
+                    print(f"[Kaalu Error] Unknown agent recipient: '{recipient}'")
+                    observation = {
+                        "success": False,
+                        "error": f"Unknown recipient agent '{recipient}'. Allowed agents are 'faulkner' and 'david'."
+                    }
+                else:
+                    print(f"[Kaalu] Delegating task to '{recipient}' -> action: '{task_action}'...")
+                    try:
+                        await self.ws_client.send_task(
+                            recipient=recipient,
+                            action=task_action,
+                            payload=payload
+                        )
+
+                        print(f"[Kaalu] Awaiting response from '{recipient}'...")
+                        observation = await self.ws_client.receive_response(timeout=60.0)
+                    except Exception as comm_err:
+                        print(f"[Kaalu Error] Communication with '{recipient}' failed: {comm_err}")
+                        observation = {
+                            "success": False,
+                            "error": f"Failed to communicate with agent '{recipient}': {str(comm_err)}"
+                        }
+
+                print(f"[Kaalu] Observation from '{recipient}': {observation}")
+
+                # Update conversation history with the action and observation for next reasoning turn
+                messages.append({"role": "assistant", "content": llm_response})
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        f"Observation from '{recipient}' for action '{task_action}':\n"
+                        f"{json.dumps(observation, indent=2)}\n\n"
+                        "Evaluate this observation. If the objective is complete, respond with action 'finish'. "
+                        "Otherwise, take the next delegated action. Output JSON only."
+                    )
+                })
+
+            else:
+                print(f"[Kaalu Warning] Unknown action type '{action_type}'. Requesting valid action...")
+                messages.append({"role": "assistant", "content": llm_response})
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        f"The action '{action_type}' is invalid. The 'action' field must be either "
+                        "'delegate' or 'finish'. Please provide a valid JSON decision."
+                    )
+                })
+
+        # Max steps exceeded
+        print(f"[Kaalu Warning] Maximum step count ({self.max_steps}) reached.")
+        return {
+            "status": "max_steps_exceeded",
+            "final_answer": f"Task stopped: reached maximum allowed reasoning steps ({self.max_steps}).",
+            "steps_taken": steps_taken
+        }
+
+    async def run_interactive(self):
+        """Interactive REPL mode for continuous user interaction with Kaalu."""
+        print("=" * 60)
+        print("          KAALU MASTER ORCHESTRATOR ACTIVE")
+        print("  Type your task/objective, or type 'exit' / 'quit' to stop.")
+        print("  Type 'clear' to reset chat memory, or 'history' to view.")
+        print("=" * 60)
+
+        while True:
+            try:
+                user_input = input("\nKaalu> ").strip()
+                if not user_input:
+                    continue
+                if user_input.lower() in ("exit", "quit"):
+                    print("\n[Kaalu] Shutting down orchestrator session. Goodbye.")
+                    break
+                if user_input.lower() in ("clear", "reset"):
+                    self.reset_session()
+                    continue
+                if user_input.lower() in ("history", "context"):
+                    if not self.conversation_history:
+                        print("[Kaalu] No previous session history.")
+                    else:
+                        print("\n=== Session History ===")
+                        for i, msg in enumerate(self.conversation_history, 1):
+                            role = "User" if msg["role"] == "user" else "Kaalu"
+                            preview = msg["content"][:100].replace("\n", " ")
+                            print(f"{i}. [{role}]: {preview}...")
+                        print("=" * 23)
+                    continue
+
+                result = await self.process_user_goal(user_input)
+                final_answer_text = result.get('final_answer', str(result)) if isinstance(result, dict) else str(result)
+                voice_text = result.get('voice_response') if isinstance(result, dict) else None
+                if not voice_text:
+                    voice_text = final_answer_text
+
+                print("\n" + "=" * 40)
+                if Speaker is not None:
+                    try:
+                        Speaker.speak(f"Sir, {voice_text}")
+                    except Exception as tts_err:
+                        print(f"[Voice Warning] TTS playback failed: {tts_err}")
+                print(f"[Kaalu Final Result]:\n{final_answer_text}")
+                print("=" * 40)
+
+            except (KeyboardInterrupt, EOFError):
+                print("\n[Kaalu] Session aborted by user.")
+                break
+            except Exception as e:
+                print(f"\n[Kaalu Error encountered]: {e}")
+
+    async def close(self):
+        """Clean up WebSocket client connection."""
+        await self.ws_client.close()
 
 if __name__ == "__main__":
-    # Example execution entry point
-    test_goal = "Check local directory contents via system terminal and open dashboard in browser."
-    asyncio.run(run_kaalu_orchestrator(test_goal))
+    orchestrator = KaaluOrchestrator()
+    try:
+        if len(sys.argv) > 1:
+            sample_goal = " ".join(sys.argv[1:])
+            asyncio.run(orchestrator.process_user_goal(sample_goal))
+        else:
+            asyncio.run(orchestrator.run_interactive())
+    finally:
+        asyncio.run(orchestrator.close())

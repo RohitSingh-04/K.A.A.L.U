@@ -1,6 +1,6 @@
 llm:
-  default_provider: "ollama"  # Options: ollama, openai, anthropic, gemini
-  default_model: "qwen2.5"     # Model name (e.g., qwen2.5, gpt-4o, claude-3-5-sonnet, gemini-1.5-pro)
+  default_provider: "gemini"  # Options: ollama, openai, anthropic, gemini
+  default_model: "gemini-3.1-flash-lite"     # Model name (e.g., gemini-3.1-flash-lite, gemini-flash-lite-latest, gemini-3.8-flash, qwen2.5)
   providers:
     ollama:
       base_url: "http://localhost:11434"

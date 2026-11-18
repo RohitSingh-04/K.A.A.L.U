@@ -1,6 +1,25 @@
-fastapi[standard]
-pydantic
-websockets
-litellm
-pyyaml
-python-dotenv
+# Project Kaalu V2 - Core Dependencies
+
+# Fast Central Communication Hub & WebSockets
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+websockets>=13.0
+httpx>=0.27.0
+pydantic>=2.8.0
+
+# Central LLM Gateway & Settings
+litellm>=1.40.0
+pyyaml>=6.0
+python-dotenv>=1.0.0
+
+# Faulkner System Agent (Screen Capture & Execution)
+mss>=9.0.0
+pillow>=10.0.0
+
+# Voice System (Piper Neural Text-to-Speech)
+piper-tts>=1.2.0
+sounddevice>=0.5.0
+
+# Automated Testing
+pytest>=8.0.0
+pytest-asyncio>=0.23.0

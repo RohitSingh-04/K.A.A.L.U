@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "David - Local Browser Agent",
+  "version": "1.0.1",
+  "description": "Browser automation agent connected to the RGS Central Communication Hub.",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "tabs",
+    "storage",
+    "alarms"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup/popup.html"
+  }
+}

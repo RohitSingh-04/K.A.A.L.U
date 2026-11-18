@@ -27,3 +27,16 @@ class ConnectionManager:
             print(f"[RGS Hub] Routed message from '{sender_id}' to '{recipient}'")
         else:
             print(f"[RGS Hub] Warning: Recipient '{recipient}' not found or offline.")
+            if sender_id and sender_id in self.active_connections:
+                error_reply = {
+                    "recipient": sender_id,
+                    "sender": "rgs_hub",
+                    "action": f"{data.get('action', 'task')}_result",
+                    "status": "error",
+                    "error": f"Agent '{recipient}' is not connected or offline.",
+                    "payload": {
+                        "success": False,
+                        "error": f"Agent '{recipient}' is offline."
+                    }
+                }
+                await self.active_connections[sender_id].send_json(error_reply)

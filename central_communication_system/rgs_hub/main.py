@@ -44,6 +44,8 @@ async def generate_llm_completion(request: LLMGenerationRequest):
         )
         return LLMGenerationResponse(**result)
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.websocket("/ws/{client_id}")
@@ -55,6 +57,15 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
     try:
         while True:
             raw_data = await websocket.receive_json()
+            if raw_data.get("action") == "ping":
+                await websocket.send_json({
+                    "recipient": client_id,
+                    "sender": "rgs_hub",
+                    "action": "pong",
+                    "payload": {}
+                })
+                continue
+
             try:
                 message = AgentMessage(**raw_data)
                 await manager.route_message(client_id, message.model_dump())
