@@ -15,7 +15,7 @@ from user_profile.schemas import (
 )
 from user_profile.profile_manager import ProfileManager, DEFAULT_PROFILE_PATH
 from user_profile.generator import ProfileGenerator
-from user_profile.web_ui import render_upload_page, render_edit_page, build_user_profile_from_dict
+from user_profile.web_ui import render_upload_page, render_edit_page, render_settings_page, build_user_profile_from_dict
 
 __all__ = [
     "BasicDetails",
@@ -31,5 +31,6 @@ __all__ = [
     "ProfileGenerator",
     "render_upload_page",
     "render_edit_page",
+    "render_settings_page",
     "build_user_profile_from_dict",
 ]

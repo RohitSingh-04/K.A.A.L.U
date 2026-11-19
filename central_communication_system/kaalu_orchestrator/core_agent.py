@@ -36,6 +36,17 @@ except (ImportError, ValueError):
         except (ImportError, ValueError):
             JobTrackerManager = None
 
+try:
+    from android_controller.manager import AndroidDeviceManager
+except (ImportError, ValueError):
+    try:
+        from ..android_controller.manager import AndroidDeviceManager
+    except (ImportError, ValueError):
+        try:
+            from central_communication_system.android_controller.manager import AndroidDeviceManager
+        except (ImportError, ValueError):
+            AndroidDeviceManager = None
+
 from kaalu_orchestrator.prompts import KAALU_SYSTEM_PROMPT
 from kaalu_orchestrator.ws_client import KaaluWSClient
 from kaalu_orchestrator.rgs_llm_client import RGSLLMClient
@@ -54,7 +65,8 @@ class KaaluOrchestrator:
         max_steps: int = 15,
         max_history_turns: int = 10,
         profile_manager: Optional[Any] = None,
-        job_tracker: Optional[Any] = None
+        job_tracker: Optional[Any] = None,
+        android_manager: Optional[Any] = None
     ):
         self.llm_client = RGSLLMClient(gateway_url=gateway_url)
         self.ws_client = KaaluWSClient(uri=ws_uri)
@@ -74,6 +86,13 @@ class KaaluOrchestrator:
             self.job_tracker = JobTrackerManager.get_instance()
         else:
             self.job_tracker = None
+
+        if android_manager is not None:
+            self.android_mgr = android_manager
+        elif AndroidDeviceManager is not None:
+            self.android_mgr = AndroidDeviceManager.get_instance()
+        else:
+            self.android_mgr = None
 
     def save_downloaded_resume(
         self,
@@ -146,6 +165,79 @@ class KaaluOrchestrator:
             notes=notes
         )
         return rec.model_dump() if rec else None
+
+    def android_devices(self) -> List[Dict[str, Any]]:
+        """Returns details of all connected Android devices (e.g. OnePlus Phone)."""
+        if not self.android_mgr:
+            return []
+        return self.android_mgr.list_devices_details()
+
+    def android_screenshot(self, serial: Optional[str] = None, save: bool = True) -> Dict[str, Any]:
+        """Captures a screenshot from the connected OnePlus phone or Android device."""
+        if not self.android_mgr:
+            return {"success": False, "error": "AndroidDeviceManager not initialized."}
+        return self.android_mgr.capture_screenshot(serial=serial, save=save)
+
+    def android_inspect(self, serial: Optional[str] = None) -> Dict[str, Any]:
+        """Inspects the active screen UI hierarchy, returning visible texts and interactive elements."""
+        if not self.android_mgr:
+            return {"success": False, "error": "AndroidDeviceManager not initialized."}
+        return self.android_mgr.inspect_screen(serial=serial)
+
+    def android_tap(
+        self,
+        x: Optional[int] = None,
+        y: Optional[int] = None,
+        target: Optional[str] = None,
+        serial: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Performs a touch tap at screen coordinate (x, y) OR by locating target text/button label."""
+        if not self.android_mgr:
+            return {"success": False, "error": "AndroidDeviceManager not initialized."}
+        return self.android_mgr.tap(x=x, y=y, target=target, serial=serial)
+
+    def android_type(
+        self,
+        text: str,
+        target: Optional[str] = None,
+        clear: bool = False,
+        press_enter: bool = False,
+        serial: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Types text into the active input field or focuses target input field first."""
+        if not self.android_mgr:
+            return {"success": False, "error": "AndroidDeviceManager not initialized."}
+        return self.android_mgr.type_text(
+            text=text,
+            target=target,
+            clear=clear,
+            press_enter=press_enter,
+            serial=serial
+        )
+
+    def android_swipe(self, x1: int, y1: int, x2: int, y2: int, duration_ms: int = 300, serial: Optional[str] = None) -> Dict[str, Any]:
+        """Performs a swipe or scroll gesture from (x1, y1) to (x2, y2)."""
+        if not self.android_mgr:
+            return {"success": False, "error": "AndroidDeviceManager not initialized."}
+        return self.android_mgr.swipe(x1=x1, y1=y1, x2=x2, y2=y2, duration_ms=duration_ms, serial=serial)
+
+    def android_key(self, key: str, serial: Optional[str] = None) -> Dict[str, Any]:
+        """Presses an Android key (HOME, BACK, ENTER, APP_SWITCH, etc.)."""
+        if not self.android_mgr:
+            return {"success": False, "error": "AndroidDeviceManager not initialized."}
+        return self.android_mgr.press_key(key=key, serial=serial)
+
+    def android_open_app(self, package: str, serial: Optional[str] = None) -> Dict[str, Any]:
+        """Launches an app package on the Android device."""
+        if not self.android_mgr:
+            return {"success": False, "error": "AndroidDeviceManager not initialized."}
+        return self.android_mgr.open_app(package=package, serial=serial)
+
+    def android_shell(self, command: str, serial: Optional[str] = None) -> Dict[str, Any]:
+        """Executes an arbitrary ADB shell command on the Android device."""
+        if not self.android_mgr:
+            return {"success": False, "error": "AndroidDeviceManager not initialized."}
+        return self.android_mgr.shell(command=command, serial=serial)
 
     def reset_session(self):
         """Clear multi-turn session history."""
@@ -233,6 +325,35 @@ class KaaluOrchestrator:
                         "use this verified tracking data to give direct, detailed, and accurate responses."
                     )
                 })
+
+        # Inject Connected Hardware & Mobile Devices (OnePlus Phone) if available
+        if self.android_mgr:
+            try:
+                android_devices = self.android_mgr.list_devices_details()
+                if android_devices:
+                    lines = ["[CONNECTED HARDWARE / ANDROID DEVICES (ONEPLUS PHONE)]"]
+                    for d in android_devices:
+                        lines.append(
+                            f"- Device: {d.get('market_name', 'Android Phone')} | "
+                            f"Model: {d.get('model')} ({d.get('brand', 'Android')}) | "
+                            f"Serial: {d.get('serial')} | "
+                            f"Display: {d.get('resolution', '1080x2400')} | "
+                            f"Battery: {d.get('battery_level', 'unknown')}% | "
+                            f"OS: Android {d.get('android_version', 'unknown')} | "
+                            f"Active App: {d.get('current_package', 'None')} | "
+                            f"Transport: {d.get('transport', 'Wireless TLS')}"
+                        )
+                    android_context = "\n".join(lines)
+                    messages.append({
+                        "role": "system",
+                        "content": (
+                            f"{android_context}\n\n"
+                            "CRITICAL: When the user asks to see, interact with, take screenshot of, tap, type, swipe, "
+                            "open an app, or control their mobile phone (OnePlus Phone), delegate to the 'android' agent."
+                        )
+                    })
+            except Exception as adb_err:
+                print(f"[Kaalu Warning] Could not query Android devices: {adb_err}")
 
         # Inject previous conversation turns so Kaalu remembers discovered files, folders, and outputs
         for prev_turn in self.conversation_history:
@@ -370,11 +491,75 @@ class KaaluOrchestrator:
                         except Exception as jt_err:
                             observation = {"success": False, "error": str(jt_err)}
 
+                elif recipient == "android":
+                    if not self.android_mgr:
+                        observation = {"success": False, "error": "AndroidDeviceManager is not available."}
+                    else:
+                        try:
+                            serial = payload.get("serial") or payload.get("device_serial")
+                            if task_action in ("capture_screenshot", "screenshot"):
+                                save_img = payload.get("save", True)
+                                res = self.android_mgr.capture_screenshot(serial=serial, save=save_img, include_ui=True)
+                                obs = dict(res)
+                                if "screenshot_base64" in obs:
+                                    b64_val = obs.pop("screenshot_base64")
+                                    obs["screenshot_base64_length"] = len(b64_val)
+                                    obs["has_screenshot"] = True
+                                observation = obs
+                            elif task_action in ("inspect_screen", "get_ui_elements", "get_elements", "dump_hierarchy"):
+                                observation = self.android_mgr.inspect_screen(serial=serial)
+                            elif task_action in ("tap", "click"):
+                                observation = self.android_mgr.tap(
+                                    x=int(payload.get("x")) if payload.get("x") is not None else None,
+                                    y=int(payload.get("y")) if payload.get("y") is not None else None,
+                                    target=payload.get("target") or payload.get("text") or payload.get("label"),
+                                    serial=serial
+                                )
+                            elif task_action in ("type", "type_text", "input_text"):
+                                observation = self.android_mgr.type_text(
+                                    text=str(payload.get("text", "")),
+                                    target=payload.get("target"),
+                                    clear=bool(payload.get("clear", False)),
+                                    press_enter=bool(payload.get("press_enter", False)),
+                                    serial=serial
+                                )
+                            elif task_action in ("swipe", "scroll"):
+                                observation = self.android_mgr.swipe(
+                                    x1=int(payload.get("x1", 0)),
+                                    y1=int(payload.get("y1", 0)),
+                                    x2=int(payload.get("x2", 0)),
+                                    y2=int(payload.get("y2", 0)),
+                                    duration_ms=int(payload.get("duration_ms", 300)),
+                                    serial=serial
+                                )
+                            elif task_action in ("press_key", "key", "keyevent"):
+                                observation = self.android_mgr.press_key(
+                                    key=payload.get("key", "HOME"),
+                                    serial=serial
+                                )
+                            elif task_action in ("open_app", "launch_app"):
+                                observation = self.android_mgr.open_app(
+                                    package=payload.get("package") or payload.get("package_name", ""),
+                                    serial=serial
+                                )
+                            elif task_action in ("execute_shell", "shell"):
+                                observation = self.android_mgr.shell(
+                                    command=str(payload.get("command", "")),
+                                    serial=serial
+                                )
+                            elif task_action in ("get_device_info", "list_devices", "status"):
+                                devs = self.android_mgr.list_devices_details()
+                                observation = {"success": True, "count": len(devs), "devices": devs}
+                            else:
+                                observation = {"success": False, "error": f"Unknown android action: '{task_action}'"}
+                        except Exception as android_err:
+                            observation = {"success": False, "error": str(android_err)}
+
                 elif recipient not in ("faulkner", "david"):
                     print(f"[Kaalu Error] Unknown agent recipient: '{recipient}'")
                     observation = {
                         "success": False,
-                        "error": f"Unknown recipient agent '{recipient}'. Allowed agents are 'faulkner', 'david', and 'job_tracker'."
+                        "error": f"Unknown recipient agent '{recipient}'. Allowed agents are 'faulkner', 'david', 'job_tracker', and 'android'."
                     }
                 else:
                     print(f"[Kaalu] Delegating task to '{recipient}' -> action: '{task_action}'...")

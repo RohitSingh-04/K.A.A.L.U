@@ -15,6 +15,37 @@ if hasattr(pathlib, "PosixPath"):
 import sounddevice as sd
 from piper import PiperVoice, SynthesisConfig
 
+VOICE_CONFIG_FILE = Path(__file__).resolve().parent.parent / "data" / "voice_settings.json"
+
+
+def get_configured_voice() -> str:
+    """Reads the active voice name from persistent storage, falling back to 'tony' or 'jarvis'."""
+    if VOICE_CONFIG_FILE.exists():
+        try:
+            with open(VOICE_CONFIG_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                v = data.get("active_voice")
+                if v and isinstance(v, str):
+                    return v.strip().lower()
+        except Exception:
+            pass
+    _models_dir = Path(__file__).resolve().parent / "models"
+    _has_tony = (
+        (_models_dir / "tony").exists()
+        and list((_models_dir / "tony").glob("*.onnx"))
+    )
+    return "tony" if _has_tony else "jarvis"
+
+
+def save_configured_voice(voice_name: str) -> None:
+    """Persists the active voice name to storage."""
+    try:
+        VOICE_CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with open(VOICE_CONFIG_FILE, "w", encoding="utf-8") as f:
+            json.dump({"active_voice": voice_name.strip().lower()}, f, indent=2)
+    except Exception as e:
+        print(f"[Voice Warning] Failed to persist voice setting: {e}")
+
 
 def clean_tts_text(text: str) -> str:
     """
@@ -58,7 +89,7 @@ def clean_tts_text(text: str) -> str:
 
 
 class VoiceEngine:
-    def __init__(self, models_dir=None, default_voice="jarvis", use_cuda=None):
+    def __init__(self, models_dir=None, default_voice=None, use_cuda=None):
         if models_dir is None:
             models_dir = Path(__file__).resolve().parent / "models"
         self.models_dir = Path(models_dir)
@@ -79,14 +110,15 @@ class VoiceEngine:
         self.voice_name = None
         self.model_config = None
 
-        if default_voice:
-            voice_dir = self.models_dir / default_voice
+        target_voice = default_voice or get_configured_voice()
+        if target_voice:
+            voice_dir = self.models_dir / target_voice
             if voice_dir.exists() and list(voice_dir.glob("*.onnx")):
-                self.set_voice(default_voice)
+                self.set_voice(target_voice, persist=False)
             elif (self.models_dir / "jarvis").exists() and list((self.models_dir / "jarvis").glob("*.onnx")):
-                self.set_voice("jarvis")
+                self.set_voice("jarvis", persist=False)
 
-    def set_voice(self, name: str):
+    def set_voice(self, name: str, persist: bool = True):
         """Load a pretrained or custom Piper ONNX voice."""
         voice_dir = self.models_dir / name
         if not voice_dir.exists():
@@ -109,7 +141,18 @@ class VoiceEngine:
             self.model_config = json.load(f)
 
         self.voice_name = name
+        if persist:
+            save_configured_voice(name)
         print(f"Loaded voice: {name}")
+
+    def sync_voice(self):
+        """Checks if persisted voice setting differs from loaded voice and reloads if needed."""
+        target = get_configured_voice()
+        if target and target != self.voice_name:
+            try:
+                self.set_voice(target, persist=False)
+            except Exception as e:
+                print(f"[Voice Warning] Failed to sync active voice to '{target}': {e}")
 
     def train_voice(
         self,
@@ -263,6 +306,9 @@ class VoiceEngine:
 
     def speak(self, text: str, speed=1.0):
         """Generate speech and play it immediately with automated text cleaning."""
+        # Ensure active voice is synchronized with persistent settings
+        self.sync_voice()
+
         if self.voice is None:
             raise RuntimeError("No voice is loaded.")
         if not isinstance(text, str) or not text.strip():
@@ -304,6 +350,5 @@ def _is_valid_voice_dir(voice_dir: Path) -> bool:
     return bool(onnx_files and Path(str(onnx_files[0]) + ".json").exists())
 
 _models_dir = Path(__file__).resolve().parent / "models"
-_has_tony = _is_valid_voice_dir(_models_dir / "tony")
-_default_voice = "tony" if _has_tony else "jarvis"
+_default_voice = get_configured_voice()
 Speaker = VoiceEngine(models_dir=_models_dir, default_voice=_default_voice)

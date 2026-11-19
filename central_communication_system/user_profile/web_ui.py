@@ -521,6 +521,137 @@ textarea {
 .repo-name { font-weight: 600; font-size: 0.9rem; color: #38bdf8; }
 .repo-desc { font-size: 0.8rem; color: #94a3b8; margin-top: 0.2rem; }
 .repo-meta { font-size: 0.75rem; color: #64748b; margin-top: 0.3rem; display: flex; gap: 0.75rem; }
+.badge-online {
+    background: rgba(16, 185, 129, 0.15);
+    border: 1px solid #10b981;
+    color: #34d399;
+    font-weight: 600;
+    padding: 0.25rem 0.65rem;
+    border-radius: 9999px;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.78rem;
+}
+.badge-offline {
+    background: rgba(239, 68, 68, 0.15);
+    border: 1px solid #ef4444;
+    color: #f87171;
+    font-weight: 600;
+    padding: 0.25rem 0.65rem;
+    border-radius: 9999px;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.78rem;
+}
+.status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+}
+.dot-green {
+    background: #10b981;
+    box-shadow: 0 0 8px rgba(16, 185, 129, 0.8);
+}
+.dot-red {
+    background: #ef4444;
+    box-shadow: 0 0 8px rgba(239, 68, 68, 0.8);
+}
+.dot-gray {
+    background: #64748b;
+}
+.service-card {
+    background: #0f172a;
+    border: 1px solid #1e293b;
+    border-radius: 8px;
+    padding: 1.25rem;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    transition: border-color 0.2s;
+}
+.service-card:hover {
+    border-color: #334155;
+}
+.service-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.75rem;
+}
+.service-title {
+    font-weight: 600;
+    font-size: 1rem;
+    color: #f1f5f9;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+.service-meta {
+    font-size: 0.825rem;
+    color: #94a3b8;
+    margin-bottom: 0.75rem;
+    line-height: 1.5;
+}
+.metric-box {
+    background: #0b0f19;
+    border: 1px solid #1e293b;
+    border-radius: 8px;
+    padding: 1rem;
+    text-align: center;
+}
+.metric-val {
+    font-size: 1.6rem;
+    font-weight: 700;
+    color: #38bdf8;
+}
+.metric-lbl {
+    font-size: 0.75rem;
+    color: #94a3b8;
+    margin-top: 0.25rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+.voice-pill {
+    padding: 0.55rem 1rem;
+    border-radius: 6px;
+    border: 1px solid #334155;
+    background: #0b0f19;
+    color: #e2e8f0;
+    cursor: pointer;
+    font-size: 0.875rem;
+    font-weight: 500;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    transition: all 0.2s;
+}
+.voice-pill:hover {
+    border-color: var(--accent);
+    background: rgba(56, 189, 248, 0.08);
+}
+.voice-pill.active {
+    border-color: var(--primary);
+    background: rgba(99, 102, 241, 0.2);
+    color: #fff;
+    box-shadow: 0 0 12px rgba(99, 102, 241, 0.3);
+}
+select.custom-select {
+    width: 100%;
+    padding: 0.6rem 0.8rem;
+    background: var(--input-bg);
+    border: 1px solid var(--input-border);
+    border-radius: 6px;
+    color: #fff;
+    font-size: 0.9rem;
+    transition: border-color 0.2s;
+}
+select.custom-select:focus {
+    outline: none;
+    border-color: var(--primary);
+}
 """
 
 _UPLOAD_JS = """
@@ -1038,6 +1169,270 @@ editForm.addEventListener('submit', async (e) => {
 });
 """
 
+_SETTINGS_JS = """
+async function loadStatus() {
+    const refreshBtn = document.getElementById('refreshBtn');
+    if (refreshBtn) refreshBtn.innerHTML = '<span class="spinner"></span> Refreshing...';
+    try {
+        const resp = await fetch('/system/status');
+        if (!resp.ok) throw new Error('Status endpoint returned ' + resp.status);
+        const data = await resp.json();
+        renderStatus(data);
+    } catch (err) {
+        console.error('Failed to load status:', err);
+    } finally {
+        if (refreshBtn) refreshBtn.innerHTML = '🔄 Refresh Status';
+    }
+}
+
+function renderStatus(data) {
+    // 1. Resume Builder
+    const rb = data.services?.resume_builder || {};
+    const rbBadge = document.getElementById('rbStatusBadge');
+    const rbMeta = document.getElementById('rbStatusMeta');
+    if (rbBadge && rbMeta) {
+        if (rb.online) {
+            rbBadge.className = 'badge-online';
+            rbBadge.innerHTML = '<span class="status-dot dot-green"></span> Online (' + (rb.latency_ms || 0) + ' ms)';
+            rbMeta.innerHTML = 'Status: <strong>Ready & Responding</strong> (HTTP ' + (rb.status_code || 200) + ')<br>URL: <a href="' + (rb.url || 'http://localhost:5173/') + '" target="_blank" style="color:#38bdf8;">' + (rb.url || 'http://localhost:5173/') + '</a>';
+        } else {
+            rbBadge.className = 'badge-offline';
+            rbBadge.innerHTML = '<span class="status-dot dot-red"></span> Offline';
+            rbMeta.innerHTML = 'Status: <strong>Not Reachable</strong><br>Ensure dev server is running on <a href="' + (rb.url || 'http://localhost:5173/') + '" target="_blank" style="color:#38bdf8;">http://localhost:5173/</a>';
+        }
+    }
+
+    // 2. Connected Agents
+    const agents = data.connected_agents?.agents || {};
+    for (const [id, info] of Object.entries(agents)) {
+        const badge = document.getElementById('agentBadge_' + id);
+        if (badge) {
+            if (info.connected) {
+                badge.className = 'badge-online';
+                badge.innerHTML = '<span class="status-dot dot-green"></span> Connected';
+            } else {
+                badge.className = 'badge-offline';
+                badge.innerHTML = '<span class="status-dot dot-gray"></span> Disconnected';
+            }
+        }
+    }
+    const totalActiveEl = document.getElementById('totalActiveAgents');
+    if (totalActiveEl) totalActiveEl.textContent = data.connected_agents?.total_active || 0;
+
+    // 3. Stored Resumes & Applications
+    const jt = data.services?.job_tracker || {};
+    const totalAppsEl = document.getElementById('totalTrackedApps');
+    if (totalAppsEl) totalAppsEl.textContent = jt.tracked_applications || 0;
+    const totalResumesEl = document.getElementById('totalStoredResumes');
+    if (totalResumesEl) totalResumesEl.textContent = jt.stored_resumes || 0;
+
+    // 4. Voice Model
+    const v = data.voice || {};
+    const activeVoiceEl = document.getElementById('currentVoiceName');
+    if (activeVoiceEl) activeVoiceEl.textContent = (v.active_voice || 'None').toUpperCase();
+    const voiceBtns = document.querySelectorAll('.voice-pill');
+    voiceBtns.forEach(btn => {
+        const voiceName = btn.getAttribute('data-voice');
+        if (voiceName === v.active_voice) {
+            btn.classList.add('active');
+        } else {
+            btn.classList.remove('active');
+        }
+    });
+
+    // 5. LLM / Gemini Model
+    const llm = data.llm || {};
+    const modelEl = document.getElementById('currentLlmModel');
+    if (modelEl) modelEl.textContent = llm.default_model || 'Unknown';
+    const providerEl = document.getElementById('currentLlmProvider');
+    if (providerEl) providerEl.textContent = (llm.default_provider || 'gemini').toUpperCase();
+    const geminiKeyBadge = document.getElementById('geminiKeyBadge');
+    if (geminiKeyBadge) {
+        if (llm.api_keys?.gemini) {
+            geminiKeyBadge.className = 'badge-online';
+            geminiKeyBadge.innerHTML = '<span class="status-dot dot-green"></span> Key Configured';
+        } else {
+            geminiKeyBadge.className = 'badge-offline';
+            geminiKeyBadge.innerHTML = '<span class="status-dot dot-red"></span> Key Missing';
+        }
+    }
+
+    // 6. Connected Android Devices (OnePlus Phone, etc.)
+    const devices = data.connected_devices || data.android_devices || [];
+    const devContainer = document.getElementById('devicesContainer');
+    const devCountBadge = document.getElementById('totalConnectedDevices');
+    if (devCountBadge) devCountBadge.textContent = devices.length;
+
+    if (devContainer) {
+        if (devices.length === 0) {
+            devContainer.innerHTML = '<div style="color: #64748b; font-size: 0.85rem; padding: 0.5rem 0;">No Android devices detected via ADB. Connect your OnePlus phone via USB or Wireless ADB.</div>';
+        } else {
+            let devsHtml = '';
+            devices.forEach(d => {
+                const brand = d.brand || 'Android';
+                const model = d.model || '';
+                const marketName = d.market_name || (brand + ' ' + model);
+                const battery = (d.battery_level !== null && d.battery_level !== undefined) ? d.battery_level + '%' : 'N/A';
+                const res = d.resolution || '1080x2400';
+                const os = d.android_version ? 'Android ' + d.android_version : 'Android';
+                const transport = d.transport || 'Wireless TLS';
+                const serial = d.serial || '';
+
+                devsHtml += `
+                <div class="service-card" style="margin-bottom: 0.75rem;">
+                    <div>
+                        <div class="service-header">
+                            <span class="service-title">
+                                📱 ${marketName}
+                            </span>
+                            <span class="badge-online">
+                                <span class="status-dot dot-green"></span> Online (${transport})
+                            </span>
+                        </div>
+                        <div class="service-meta">
+                            <strong>Model:</strong> ${brand} ${model} &nbsp;|&nbsp; 
+                            <strong>Display:</strong> ${res} &nbsp;|&nbsp; 
+                            <strong>Battery:</strong> 🔋 ${battery} &nbsp;|&nbsp; 
+                            <strong>OS:</strong> ${os}<br>
+                            <span style="color:#64748b; font-size:0.75rem;">Serial / ID: <code>${serial}</code></span>
+                        </div>
+                    </div>
+                    <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.5rem;">
+                        <button type="button" class="btn btn-secondary" onclick="captureAndroidScreen('${serial}')" style="font-size: 0.8rem; padding: 0.4rem 0.8rem;">
+                            📸 Capture Screenshot
+                        </button>
+                        <button type="button" class="btn btn-secondary" onclick="sendAndroidKey('HOME', '${serial}')" style="font-size: 0.8rem; padding: 0.4rem 0.8rem;">
+                            🏠 Home
+                        </button>
+                        <button type="button" class="btn btn-secondary" onclick="sendAndroidKey('BACK', '${serial}')" style="font-size: 0.8rem; padding: 0.4rem 0.8rem;">
+                            ◀ Back
+                        </button>
+                        <button type="button" class="btn btn-secondary" onclick="sendAndroidKey('APP_SWITCH', '${serial}')" style="font-size: 0.8rem; padding: 0.4rem 0.8rem;">
+                            📋 Apps
+                        </button>
+                    </div>
+                </div>
+                `;
+            });
+            devContainer.innerHTML = devsHtml;
+        }
+    }
+}
+
+async function sendAndroidKey(keyName, serial) {
+    try {
+        const resp = await fetch('/android/key', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
+            body: JSON.stringify({key: keyName, serial: serial})
+        });
+        if (resp.ok) {
+            console.log('Key ' + keyName + ' dispatched.');
+        } else {
+            const err = await resp.json();
+            alert('Android key error: ' + (err.detail || 'Unknown error'));
+        }
+    } catch (e) {
+        alert('Connection error: ' + e.message);
+    }
+}
+
+async function captureAndroidScreen(serial) {
+    try {
+        const url = '/android/screenshot' + (serial ? '?serial=' + encodeURIComponent(serial) : '');
+        const resp = await fetch(url);
+        if (resp.ok) {
+            const data = await resp.json();
+            if (data.screenshot_base64) {
+                const previewModal = document.getElementById('screenPreviewModal');
+                const previewImg = document.getElementById('screenPreviewImg');
+                if (previewModal && previewImg) {
+                    previewImg.src = 'data:image/png;base64,' + data.screenshot_base64;
+                    previewModal.style.display = 'block';
+                    previewModal.scrollIntoView({ behavior: 'smooth' });
+                }
+            }
+        } else {
+            const err = await resp.json();
+            alert('Screenshot capture failed: ' + (err.detail || 'Unknown error'));
+        }
+    } catch (e) {
+        alert('Connection error: ' + e.message);
+    }
+}
+
+async function changeVoice(voiceName) {
+    try {
+        const resp = await fetch('/voice/change', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
+            body: JSON.stringify({voice: voiceName})
+        });
+        if (resp.ok) {
+            loadStatus();
+        } else {
+            const err = await resp.json();
+            alert('Failed to change voice: ' + (err.detail || 'Unknown error'));
+        }
+    } catch (e) {
+        alert('Connection error: ' + e.message);
+    }
+}
+
+async function testVoice() {
+    const btn = document.getElementById('testVoiceBtn');
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner"></span> Synthesizing...';
+    }
+    try {
+        const resp = await fetch('/voice/test', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
+            body: JSON.stringify({text: 'Sir, neural speech synthesis is operational and ready to assist.'})
+        });
+        if (!resp.ok) {
+            const err = await resp.json();
+            alert('Voice test error: ' + (err.detail || 'Unknown error'));
+        }
+    } catch (e) {
+        alert('Voice test error: ' + e.message);
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = '🔊 Test Voice Audio';
+        }
+    }
+}
+
+async function updateLlmModel() {
+    const select = document.getElementById('modelSelect');
+    if (!select) return;
+    const newModel = select.value;
+    try {
+        const resp = await fetch('/llm/change', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
+            body: JSON.stringify({model: newModel, provider: 'gemini'})
+        });
+        if (resp.ok) {
+            alert('✓ Gemini model updated to: ' + newModel);
+            loadStatus();
+        } else {
+            const err = await resp.json();
+            alert('Failed to update LLM model: ' + (err.detail || 'Unknown error'));
+        }
+    } catch (e) {
+        alert('Connection error: ' + e.message);
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    loadStatus();
+    setInterval(loadStatus, 8000);
+});
+"""
+
 
 def render_upload_page(message: Optional[str] = None, error: Optional[str] = None) -> str:
     """Renders the HTML file upload interface for resumes."""
@@ -1058,11 +1453,12 @@ def render_upload_page(message: Optional[str] = None, error: Optional[str] = Non
 <body>
     <nav>
         <a href="/profile/edit" class="nav-brand">
-            <span>Project Kaalu</span> Profile Manager
+            <span>Project Kaalu</span> Central Hub
         </a>
         <div class="nav-links">
             <a href="/profile/upload" class="active">📄 Upload Resume</a>
             <a href="/profile/edit">✏️ Edit Profile</a>
+            <a href="/settings" title="Settings">⚙️ Settings</a>
             <a href="/profile" target="_blank">📋 Raw JSON</a>
         </div>
     </nav>
@@ -1228,11 +1624,12 @@ def render_edit_page(
 <body>
     <nav>
         <a href="/profile/edit" class="nav-brand">
-            <span>Project Kaalu</span> Profile Manager
+            <span>Project Kaalu</span> Central Hub
         </a>
         <div class="nav-links">
             <a href="/profile/upload">📄 Upload Resume</a>
             <a href="/profile/edit" class="active">✏️ Edit Profile</a>
+            <a href="/settings" title="Settings">⚙️ Settings</a>
             <a href="/profile" target="_blank">📋 Raw JSON</a>
         </div>
     </nav>
@@ -1436,6 +1833,289 @@ def render_edit_page(
             }}
         }}
     </script>
+</body>
+</html>
+"""
+
+
+def render_settings_page(
+    status_data: Optional[Dict[str, Any]] = None,
+    message: Optional[str] = None,
+    error: Optional[str] = None
+) -> str:
+    """
+    Renders the unified Settings & Agent Fleet Monitoring dashboard.
+    Displays live status of Resume Builder, connected agents, online services,
+    voice engine with switcher, and Gemini LLM configuration.
+    """
+    alert_html = ""
+    if message:
+        alert_html = f'<div class="alert alert-success"><span>✓</span> {message}</div>'
+    elif error:
+        alert_html = f'<div class="alert alert-error"><span>✕</span> {error}</div>'
+
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>System Settings & Agent Fleet | Project Kaalu</title>
+    <style>{_CSS_STYLES}</style>
+</head>
+<body>
+    <nav>
+        <a href="/profile/edit" class="nav-brand">
+            <span>Project Kaalu</span> Central Hub
+        </a>
+        <div class="nav-links">
+            <a href="/profile/upload">📄 Upload Resume</a>
+            <a href="/profile/edit">✏️ Edit Profile</a>
+            <a href="/settings" class="active" title="Settings">⚙️ Settings</a>
+            <a href="/profile" target="_blank">📋 Raw JSON</a>
+        </div>
+    </nav>
+
+    <div class="container">
+        {alert_html}
+
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 1rem;">
+            <div>
+                <h1 style="font-size: 1.6rem; font-weight: 700;">⚙️ System Settings & Fleet Monitor</h1>
+                <p style="color: var(--text-muted); font-size: 0.875rem;">
+                    Live health telemetry, connected sub-agents, online services, neural voice switching, and Gemini model settings.
+                </p>
+            </div>
+            <div style="display: flex; gap: 0.5rem;">
+                <button type="button" class="btn btn-secondary" id="refreshBtn" onclick="loadStatus()">
+                    🔄 Refresh Status
+                </button>
+                <a href="http://localhost:5173/" target="_blank" class="btn btn-primary">
+                    🚀 Launch Resume Builder
+                </a>
+            </div>
+        </div>
+
+        <!-- Metric KPI Cards -->
+        <div class="grid-3" style="margin-bottom: 1.75rem;">
+            <div class="metric-box">
+                <div class="metric-val" id="totalActiveAgents">0</div>
+                <div class="metric-lbl">Connected Sub-Agents</div>
+            </div>
+            <div class="metric-box">
+                <div class="metric-val" id="totalStoredResumes">0</div>
+                <div class="metric-lbl">Stored Tailored Resumes</div>
+            </div>
+            <div class="metric-box">
+                <div class="metric-val" id="totalTrackedApps">0</div>
+                <div class="metric-lbl">Tracked Applications</div>
+            </div>
+        </div>
+
+        <!-- Section 1: Online Services -->
+        <div class="card">
+            <div class="card-header-flex">
+                <div class="card-title">🌐 Online Services & External Integrations</div>
+            </div>
+            <div class="grid-2">
+                <!-- Resume Builder Card -->
+                <div class="service-card">
+                    <div>
+                        <div class="service-header">
+                            <span class="service-title">📝 Resume Builder Web App</span>
+                            <span id="rbStatusBadge" class="badge-offline">
+                                <span class="status-dot dot-gray"></span> Probing...
+                            </span>
+                        </div>
+                        <div class="service-meta" id="rbStatusMeta">
+                            Checking connection to <strong>http://localhost:5173/</strong>...
+                        </div>
+                    </div>
+                    <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem;">
+                        <a href="http://localhost:5173/" target="_blank" class="btn btn-secondary" style="font-size: 0.8rem; padding: 0.4rem 0.8rem;">
+                            🔗 Open Web App
+                        </a>
+                        <button type="button" class="btn btn-secondary" onclick="loadStatus()" style="font-size: 0.8rem; padding: 0.4rem 0.8rem;">
+                            ⚡ Probe Now
+                        </button>
+                    </div>
+                </div>
+
+                <!-- RGS Gateway Card -->
+                <div class="service-card">
+                    <div>
+                        <div class="service-header">
+                            <span class="service-title">⚡ RGS Central Communication Hub</span>
+                            <span class="badge-online">
+                                <span class="status-dot dot-green"></span> Online (:8000)
+                            </span>
+                        </div>
+                        <div class="service-meta">
+                            Status: <strong>Active Gateway v2.0.0</strong><br>
+                            Channels: WebSocket Messaging Bus & LiteLLM Gateway
+                        </div>
+                    </div>
+                    <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem;">
+                        <a href="/system/status" target="_blank" class="btn btn-secondary" style="font-size: 0.8rem; padding: 0.4rem 0.8rem;">
+                            📊 System Status JSON
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Section 2: Connected Sub-Agents Fleet -->
+        <div class="card">
+            <div class="card-header-flex">
+                <div class="card-title">🤖 Connected Sub-Agents Fleet</div>
+            </div>
+            <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1rem;">
+                Autonomous multi-agent processes connected to RGS Central Hub via high-speed WebSockets.
+            </p>
+            <div class="grid-3">
+                <!-- Kaalu -->
+                <div class="item-card" style="margin-bottom: 0;">
+                    <div class="item-header-flex">
+                        <span style="font-weight: 600; color: #f1f5f9;">👑 Kaalu</span>
+                        <span id="agentBadge_kaalu" class="badge-offline">
+                            <span class="status-dot dot-gray"></span> Disconnected
+                        </span>
+                    </div>
+                    <div style="font-size: 0.8rem; color: #94a3b8; line-height: 1.4;">
+                        <strong>Role:</strong> Master Orchestrator, ReAct loop, context manager, and user-facing voice intelligence.
+                    </div>
+                    <div style="margin-top: 0.5rem; font-size: 0.75rem; color: #64748b;">
+                        <code>/ws/kaalu</code>
+                    </div>
+                </div>
+
+                <!-- Faulkner -->
+                <div class="item-card" style="margin-bottom: 0;">
+                    <div class="item-header-flex">
+                        <span style="font-weight: 600; color: #f1f5f9;">⚡ Faulkner</span>
+                        <span id="agentBadge_faulkner" class="badge-offline">
+                            <span class="status-dot dot-gray"></span> Disconnected
+                        </span>
+                    </div>
+                    <div style="font-size: 0.8rem; color: #94a3b8; line-height: 1.4;">
+                        <strong>Role:</strong> Local Windows system agent, terminal execution, desktop screen capture, and process control.
+                    </div>
+                    <div style="margin-top: 0.5rem; font-size: 0.75rem; color: #64748b;">
+                        <code>/ws/faulkner</code>
+                    </div>
+                </div>
+
+                <!-- David -->
+                <div class="item-card" style="margin-bottom: 0;">
+                    <div class="item-header-flex">
+                        <span style="font-weight: 600; color: #f1f5f9;">🌐 David</span>
+                        <span id="agentBadge_david" class="badge-offline">
+                            <span class="status-dot dot-gray"></span> Disconnected
+                        </span>
+                    </div>
+                    <div style="font-size: 0.8rem; color: #94a3b8; line-height: 1.4;">
+                        <strong>Role:</strong> Chrome Extension V3 browser agent, semantic DOM navigation, form autofill, and page scraping.
+                    </div>
+                    <div style="margin-top: 0.5rem; font-size: 0.75rem; color: #64748b;">
+                        <code>/ws/david</code>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Section 3: Connected Hardware & Android Devices -->
+        <div class="card">
+            <div class="card-header-flex">
+                <div class="card-title">📱 Connected Hardware & Mobile Devices (ADB)</div>
+                <div>
+                    <span style="font-size: 0.8rem; color: #94a3b8; margin-right: 0.5rem;">Detected Devices:</span>
+                    <span id="totalConnectedDevices" class="badge-online" style="padding: 0.2rem 0.6rem;">0</span>
+                </div>
+            </div>
+            <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1rem;">
+                Real-time connection with Android phones over USB / Wireless ADB. Kaalu has vision, screen analysis, touch tap, keyboard, and shell execution capabilities.
+            </p>
+            <div id="devicesContainer">
+                <div style="color: #64748b; font-size: 0.85rem;">Scanning for connected Android devices via ADB...</div>
+            </div>
+            <!-- Live Screen Preview Modal -->
+            <div id="screenPreviewModal" style="display: none; margin-top: 1.25rem; padding: 1rem; background: #0b0f19; border: 1px solid #1e293b; border-radius: 8px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
+                    <span style="font-weight: 600; color: #38bdf8;">📸 Live OnePlus Screen Preview</span>
+                    <button type="button" class="btn-remove" onclick="document.getElementById('screenPreviewModal').style.display='none'">✕ Close Preview</button>
+                </div>
+                <div style="text-align: center;">
+                    <img id="screenPreviewImg" src="" alt="Android Screenshot" style="max-height: 480px; max-width: 100%; border-radius: 8px; border: 1px solid #334155; box-shadow: 0 4px 12px rgba(0,0,0,0.5);">
+                </div>
+            </div>
+        </div>
+
+        <!-- Section 4: Neural Voice Engine -->
+        <div class="card">
+            <div class="card-header-flex">
+                <div class="card-title">🎙️ Neural Voice Engine & Model Selector</div>
+                <div>
+                    <span style="font-size: 0.8rem; color: #94a3b8; margin-right: 0.5rem;">Active Voice:</span>
+                    <span id="currentVoiceName" class="badge-online" style="font-size: 0.85rem; padding: 0.3rem 0.8rem;">TONY</span>
+                </div>
+            </div>
+            <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1rem;">
+                Select between custom-trained Piper VITS models or pretrained Jarvis models. Switch voice in real-time without restarting agents.
+            </p>
+            <div style="display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: center; margin-bottom: 1.25rem;">
+                <button type="button" class="voice-pill active" data-voice="tony" onclick="changeVoice('tony')">
+                    🎙️ Tony (RTX 3050 Fine-Tuned)
+                </button>
+                <button type="button" class="voice-pill" data-voice="jarvis" onclick="changeVoice('jarvis')">
+                    🎙️ Jarvis (Pretrained)
+                </button>
+                <button type="button" class="btn btn-secondary" id="testVoiceBtn" onclick="testVoice()">
+                    🔊 Test Voice Audio
+                </button>
+            </div>
+            <div style="font-size: 0.8rem; color: #64748b; background: #0b0f19; padding: 0.75rem; border-radius: 6px; border: 1px solid #1e293b;">
+                ⚡ <strong>Hardware Acceleration:</strong> Tensor Core 16-mixed precision enabled on CUDA. Audio cleaned via automated regex pipe stripping markdown symbols and raw file paths.
+            </div>
+        </div>
+
+        <!-- Section 4: LLM Gateway & Gemini Configuration -->
+        <div class="card">
+            <div class="card-header-flex">
+                <div class="card-title">🧠 Central LLM Gateway & Gemini Model</div>
+                <div id="geminiKeyBadge" class="badge-online">
+                    <span class="status-dot dot-green"></span> Key Configured
+                </div>
+            </div>
+            <div class="grid-2" style="margin-bottom: 1.25rem;">
+                <div class="form-group">
+                    <label>Active Provider</label>
+                    <input type="text" id="currentLlmProvider" value="GEMINI" readonly style="opacity: 0.85; cursor: default;">
+                </div>
+                <div class="form-group">
+                    <label>Active Model Name</label>
+                    <input type="text" id="currentLlmModel" value="gemini-3.1-flash-lite" readonly style="opacity: 0.85; cursor: default;">
+                </div>
+            </div>
+            <div class="grid-2" style="align-items: flex-end;">
+                <div class="form-group" style="margin-bottom: 0;">
+                    <label for="modelSelect">Switch Gemini / LiteLLM Model</label>
+                    <select id="modelSelect" class="custom-select">
+                        <option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite (Fastest, High Throughput)</option>
+                        <option value="gemini-flash-latest">gemini-flash-latest (Production General)</option>
+                        <option value="gemini-2.5-flash">gemini-2.5-flash (Balanced Reasoning)</option>
+                        <option value="gemini-2.5-pro">gemini-2.5-pro (Deep Thought & Planning)</option>
+                        <option value="qwen2.5:3b">qwen2.5:3b (Local Ollama Fallback)</option>
+                    </select>
+                </div>
+                <div>
+                    <button type="button" class="btn btn-primary" onclick="updateLlmModel()">
+                        💾 Update Active Model
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>{_SETTINGS_JS}</script>
 </body>
 </html>
 """
