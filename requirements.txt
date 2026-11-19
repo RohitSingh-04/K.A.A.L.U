@@ -12,6 +12,9 @@ litellm>=1.40.0
 pyyaml>=6.0
 python-dotenv>=1.0.0
 
+# User Profile & Resume Parser
+pypdf>=5.0.0
+
 # Faulkner System Agent (Screen Capture & Execution)
 mss>=9.0.0
 pillow>=10.0.0
