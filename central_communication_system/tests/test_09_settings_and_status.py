@@ -51,6 +51,10 @@ def test_get_settings_html_page(client):
     assert "Neural Voice Engine" in html
     assert "Central LLM Gateway & Gemini Model" in html
     assert "gemini-3.1-flash-lite" in html
+    # Dynamic Voice Pills
+    assert 'data-voice="jarvis-gb"' in html
+    assert 'data-voice="tony"' in html
+    assert 'data-voice="jarvis"' in html
 
 
 @pytest.mark.asyncio

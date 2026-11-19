@@ -1,6 +1,7 @@
 import html
 import json
-from typing import Any, Dict, List, Optional
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 from user_profile.schemas import (
     BasicDetails,
     Certification,
@@ -1228,17 +1229,41 @@ function renderStatus(data) {
 
     // 4. Voice Model
     const v = data.voice || {};
+    const activeVoice = (v.active_voice || '').toLowerCase();
     const activeVoiceEl = document.getElementById('currentVoiceName');
-    if (activeVoiceEl) activeVoiceEl.textContent = (v.active_voice || 'None').toUpperCase();
-    const voiceBtns = document.querySelectorAll('.voice-pill');
-    voiceBtns.forEach(btn => {
-        const voiceName = btn.getAttribute('data-voice');
-        if (voiceName === v.active_voice) {
-            btn.classList.add('active');
-        } else {
-            btn.classList.remove('active');
-        }
-    });
+    if (activeVoiceEl) activeVoiceEl.textContent = (activeVoice || 'None').toUpperCase();
+
+    const availableVoices = v.available_voices || [];
+    const container = document.getElementById('voicePillsContainer');
+    if (container && availableVoices.length > 0) {
+        let pillsHtml = '';
+        availableVoices.forEach(voiceKey => {
+            const isActive = voiceKey.toLowerCase() === activeVoice;
+            let label = voiceKey.toUpperCase();
+            if (voiceKey.toLowerCase() === 'tony') {
+                label = 'Tony (RTX 3050 Fine-Tuned)';
+            } else if (voiceKey.toLowerCase() === 'jarvis') {
+                label = 'Jarvis (US Pretrained)';
+            } else if (voiceKey.toLowerCase() === 'jarvis-gb') {
+                label = 'Jarvis (GB British Pretrained)';
+            } else {
+                label = voiceKey.replace(/[-_]/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) + ' (Custom)';
+            }
+            pillsHtml += `<button type="button" class="voice-pill ${isActive ? 'active' : ''}" data-voice="${voiceKey}" onclick="changeVoice('${voiceKey}')">🎙️ ${label}</button> `;
+        });
+        pillsHtml += `<button type="button" class="btn btn-secondary" id="testVoiceBtn" onclick="testVoice()">🔊 Test Voice Audio</button>`;
+        container.innerHTML = pillsHtml;
+    } else {
+        const voiceBtns = document.querySelectorAll('.voice-pill');
+        voiceBtns.forEach(btn => {
+            const voiceName = btn.getAttribute('data-voice');
+            if (voiceName === activeVoice) {
+                btn.classList.add('active');
+            } else {
+                btn.classList.remove('active');
+            }
+        });
+    }
 
     // 5. LLM / Gemini Model
     const llm = data.llm || {};
@@ -1301,6 +1326,9 @@ function renderStatus(data) {
                         <button type="button" class="btn btn-secondary" onclick="captureAndroidScreen('${serial}')" style="font-size: 0.8rem; padding: 0.4rem 0.8rem;">
                             📸 Capture Screenshot
                         </button>
+                        <button type="button" class="btn btn-secondary" onclick="unlockAndroidDevice('${serial}')" style="font-size: 0.8rem; padding: 0.4rem 0.8rem;">
+                            🔓 Unlock
+                        </button>
                         <button type="button" class="btn btn-secondary" onclick="sendAndroidKey('HOME', '${serial}')" style="font-size: 0.8rem; padding: 0.4rem 0.8rem;">
                             🏠 Home
                         </button>
@@ -1316,6 +1344,13 @@ function renderStatus(data) {
             });
             devContainer.innerHTML = devsHtml;
         }
+    }
+
+    // 7. Phone Security & Unlock PIN Status
+    if (data.android_credentials) {
+        updatePhonePinBadge(data.android_credentials);
+    } else {
+        loadPhonePinStatus();
     }
 }
 
@@ -1359,6 +1394,152 @@ async function captureAndroidScreen(serial) {
     } catch (e) {
         alert('Connection error: ' + e.message);
     }
+}
+
+function updatePhonePinBadge(data) {
+    const badge = document.getElementById('phonePinStatusBadge');
+    const updatedText = document.getElementById('phonePinUpdatedText');
+    if (badge) {
+        if (data.configured) {
+            badge.className = 'badge-online';
+            badge.innerHTML = '<span class="status-dot dot-green"></span> Configured (' + (data.cipher_method || 'DPAPI') + ')';
+        } else {
+            badge.className = 'badge-offline';
+            badge.innerHTML = '<span class="status-dot dot-gray"></span> Not Configured';
+        }
+    }
+    if (updatedText && data.updated_at) {
+        const dateStr = new Date(data.updated_at).toLocaleTimeString();
+        updatedText.innerText = 'Last updated: ' + dateStr;
+    } else if (updatedText && !data.configured) {
+        updatedText.innerText = '';
+    }
+}
+
+async function loadPhonePinStatus(serial) {
+    try {
+        const url = '/android/credentials' + (serial ? '?serial=' + encodeURIComponent(serial) : '');
+        const resp = await fetch(url);
+        if (resp.ok) {
+            const data = await resp.json();
+            updatePhonePinBadge(data);
+        }
+    } catch (e) {
+        console.error('Failed to query phone PIN status:', e);
+    }
+}
+
+async function savePhonePin() {
+    const input = document.getElementById('phonePinInput');
+    const fb = document.getElementById('phonePinFeedback');
+    if (!input || !input.value.trim()) {
+        if (fb) {
+            fb.style.display = 'block';
+            fb.style.background = '#450a0a';
+            fb.style.color = '#f87171';
+            fb.innerText = 'Please enter a valid PIN or password.';
+        }
+        return;
+    }
+    try {
+        const resp = await fetch('/android/credentials', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
+            body: JSON.stringify({pin: input.value.trim()})
+        });
+        const res = await resp.json();
+        if (resp.ok && res.success) {
+            input.value = '';
+            if (fb) {
+                fb.style.display = 'block';
+                fb.style.background = '#064e3b';
+                fb.style.color = '#34d399';
+                fb.innerText = '✓ Phone PIN encrypted and safely saved via ' + (res.cipher_method || 'DPAPI') + '.';
+            }
+            await loadPhonePinStatus();
+        } else {
+            if (fb) {
+                fb.style.display = 'block';
+                fb.style.background = '#450a0a';
+                fb.style.color = '#f87171';
+                fb.innerText = 'Error: ' + (res.detail || res.error || 'Failed to save credentials');
+            }
+        }
+    } catch (e) {
+        if (fb) {
+            fb.style.display = 'block';
+            fb.style.background = '#450a0a';
+            fb.style.color = '#f87171';
+            fb.innerText = 'Network error: ' + e.message;
+        }
+    }
+}
+
+async function clearPhonePin() {
+    if (!confirm('Are you sure you want to remove the saved phone unlock PIN?')) return;
+    const fb = document.getElementById('phonePinFeedback');
+    try {
+        const resp = await fetch('/android/credentials', {
+            method: 'DELETE',
+            headers: {'Accept': 'application/json'}
+        });
+        const res = await resp.json();
+        if (fb) {
+            fb.style.display = 'block';
+            fb.style.background = '#064e3b';
+            fb.style.color = '#34d399';
+            fb.innerText = '✓ Phone credentials removed.';
+        }
+        await loadPhonePinStatus();
+    } catch (e) {
+        if (fb) {
+            fb.style.display = 'block';
+            fb.style.background = '#450a0a';
+            fb.style.color = '#f87171';
+            fb.innerText = 'Network error: ' + e.message;
+        }
+    }
+}
+
+async function testUnlockPhone(serial) {
+    const fb = document.getElementById('phonePinFeedback');
+    if (fb) {
+        fb.style.display = 'block';
+        fb.style.background = '#1e293b';
+        fb.style.color = '#38bdf8';
+        fb.innerText = '⏳ Waking device and executing unlock sequence...';
+    }
+    try {
+        const resp = await fetch('/android/unlock', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
+            body: JSON.stringify({serial: serial || undefined})
+        });
+        const res = await resp.json();
+        if (resp.ok && res.success) {
+            if (fb) {
+                fb.style.background = '#064e3b';
+                fb.style.color = '#34d399';
+                fb.innerText = '✓ ' + (res.message || 'Device unlocked successfully!');
+            }
+        } else {
+            if (fb) {
+                fb.style.background = '#450a0a';
+                fb.style.color = '#f87171';
+                fb.innerText = 'Unlock failed: ' + (res.detail || res.error || 'Check device connection and PIN.');
+            }
+        }
+    } catch (e) {
+        if (fb) {
+            fb.style.background = '#450a0a';
+            fb.style.color = '#f87171';
+            fb.innerText = 'Network error: ' + e.message;
+        }
+    }
+}
+
+async function unlockAndroidDevice(serial) {
+    return testUnlockPhone(serial);
 }
 
 async function changeVoice(voiceName) {
@@ -1838,6 +2019,52 @@ def render_edit_page(
 """
 
 
+def _format_voice_label(name: str) -> str:
+    n = name.lower()
+    if n == "tony":
+        return "Tony (RTX 3050 Fine-Tuned)"
+    if n == "jarvis":
+        return "Jarvis (US Pretrained)"
+    if n == "jarvis-gb":
+        return "Jarvis (GB British Pretrained)"
+    return name.replace("-", " ").replace("_", " ").title() + " (Pretrained)"
+
+
+def _get_settings_voice_info(status_data: Optional[Dict[str, Any]] = None) -> Tuple[str, str]:
+    models_dir = Path(__file__).resolve().parent.parent / "voice_system" / "models"
+    available_voices: List[str] = []
+    if models_dir.exists():
+        for d in sorted(models_dir.iterdir()):
+            if d.is_dir() and list(d.glob("*.onnx")):
+                available_voices.append(d.name)
+    if not available_voices:
+        available_voices = ["tony", "jarvis", "jarvis-gb"]
+
+    active_voice = "tony"
+    if status_data and "voice" in status_data and status_data["voice"].get("active_voice"):
+        active_voice = str(status_data["voice"]["active_voice"]).lower()
+    else:
+        voice_cfg = Path(__file__).resolve().parent.parent / "data" / "voice_settings.json"
+        if voice_cfg.exists():
+            try:
+                with open(voice_cfg, "r", encoding="utf-8") as f:
+                    active_voice = json.load(f).get("active_voice", "tony").lower()
+            except Exception:
+                pass
+
+    voice_pills = []
+    for vk in available_voices:
+        is_active = (vk.lower() == active_voice)
+        active_cls = " active" if is_active else ""
+        label = _format_voice_label(vk)
+        voice_pills.append(
+            f'<button type="button" class="voice-pill{active_cls}" data-voice="{html.escape(vk)}" onclick="changeVoice(\'{html.escape(vk)}\')">'
+            f'🎙️ {html.escape(label)}'
+            f'</button>'
+        )
+    return active_voice.upper(), "\n                ".join(voice_pills)
+
+
 def render_settings_page(
     status_data: Optional[Dict[str, Any]] = None,
     message: Optional[str] = None,
@@ -1853,6 +2080,8 @@ def render_settings_page(
         alert_html = f'<div class="alert alert-success"><span>✓</span> {message}</div>'
     elif error:
         alert_html = f'<div class="alert alert-error"><span>✕</span> {error}</div>'
+
+    active_voice_badge, voice_pills_html = _get_settings_voice_info(status_data)
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -2047,6 +2276,35 @@ def render_settings_page(
                     <img id="screenPreviewImg" src="" alt="Android Screenshot" style="max-height: 480px; max-width: 100%; border-radius: 8px; border: 1px solid #334155; box-shadow: 0 4px 12px rgba(0,0,0,0.5);">
                 </div>
             </div>
+
+            <!-- Phone Security & Unlock Credentials (Encrypted) -->
+            <div style="margin-top: 1.5rem; padding: 1rem 1.25rem; background: #0b0f19; border: 1px solid #1e293b; border-radius: 8px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; flex-wrap: wrap; gap: 0.5rem;">
+                    <div style="font-weight: 600; color: #f8fafc; font-size: 0.95rem; display: flex; align-items: center; gap: 0.5rem;">
+                        <span>🔐 Phone Security & Unlock PIN</span>
+                        <span id="phonePinStatusBadge" class="badge-offline" style="font-size: 0.75rem; padding: 0.2rem 0.6rem;">Checking...</span>
+                    </div>
+                    <span style="font-size: 0.75rem; color: #64748b;" id="phonePinUpdatedText"></span>
+                </div>
+                <p style="color: var(--text-muted); font-size: 0.8rem; margin-bottom: 0.75rem; line-height: 1.4;">
+                    Stores your phone unlock PIN/password encrypted with <strong>Windows DPAPI</strong> (machine- and user-bound hardware protection).
+                    Kaalu uses this to wake and unlock your device when prompted (e.g. <em>"Kaalu, unlock my phone"</em>) without exposing plaintext secrets.
+                </p>
+                <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center;">
+                    <input type="password" id="phonePinInput" placeholder="Enter device PIN or password" autocomplete="new-password"
+                           style="background: #0f172a; border: 1px solid #334155; color: #f8fafc; padding: 0.45rem 0.8rem; border-radius: 6px; font-size: 0.85rem; width: 220px;">
+                    <button type="button" class="btn btn-primary" onclick="savePhonePin()" style="font-size: 0.8rem; padding: 0.45rem 0.9rem;">
+                        💾 Save Encrypted PIN
+                    </button>
+                    <button type="button" class="btn btn-secondary" onclick="testUnlockPhone()" style="font-size: 0.8rem; padding: 0.45rem 0.9rem;">
+                        🔓 Test Unlock Phone
+                    </button>
+                    <button type="button" class="btn btn-remove" onclick="clearPhonePin()" style="font-size: 0.8rem; padding: 0.45rem 0.9rem;">
+                        🗑️ Clear PIN
+                    </button>
+                </div>
+                <div id="phonePinFeedback" style="display: none; margin-top: 0.5rem; font-size: 0.8rem; border-radius: 4px; padding: 0.35rem 0.6rem;"></div>
+            </div>
         </div>
 
         <!-- Section 4: Neural Voice Engine -->
@@ -2055,19 +2313,14 @@ def render_settings_page(
                 <div class="card-title">🎙️ Neural Voice Engine & Model Selector</div>
                 <div>
                     <span style="font-size: 0.8rem; color: #94a3b8; margin-right: 0.5rem;">Active Voice:</span>
-                    <span id="currentVoiceName" class="badge-online" style="font-size: 0.85rem; padding: 0.3rem 0.8rem;">TONY</span>
+                    <span id="currentVoiceName" class="badge-online" style="font-size: 0.85rem; padding: 0.3rem 0.8rem;">{active_voice_badge}</span>
                 </div>
             </div>
             <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1rem;">
                 Select between custom-trained Piper VITS models or pretrained Jarvis models. Switch voice in real-time without restarting agents.
             </p>
-            <div style="display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: center; margin-bottom: 1.25rem;">
-                <button type="button" class="voice-pill active" data-voice="tony" onclick="changeVoice('tony')">
-                    🎙️ Tony (RTX 3050 Fine-Tuned)
-                </button>
-                <button type="button" class="voice-pill" data-voice="jarvis" onclick="changeVoice('jarvis')">
-                    🎙️ Jarvis (Pretrained)
-                </button>
+            <div id="voicePillsContainer" style="display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: center; margin-bottom: 1.25rem;">
+                {voice_pills_html}
                 <button type="button" class="btn btn-secondary" id="testVoiceBtn" onclick="testVoice()">
                     🔊 Test Voice Audio
                 </button>

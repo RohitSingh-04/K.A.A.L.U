@@ -6,13 +6,19 @@ def test_speaker_initialization():
     """Verify that Speaker initializes and defaults to tony voice when available."""
     assert Speaker is not None
     assert Speaker.voice is not None
-    assert Speaker.voice_name in ("tony", "jarvis")
+    assert Speaker.voice_name in ("tony", "jarvis", "jarvis-gb")
 
 def test_voice_switching():
     """Verify switching to available voices."""
     Speaker.set_voice("jarvis")
     assert Speaker.voice_name == "jarvis"
     assert Speaker.voice is not None
+
+    jarvis_gb_models = list((Speaker.models_dir / "jarvis-gb").glob("*.onnx")) if (Speaker.models_dir / "jarvis-gb").exists() else []
+    if jarvis_gb_models:
+        Speaker.set_voice("jarvis-gb")
+        assert Speaker.voice_name == "jarvis-gb"
+        assert Speaker.voice is not None
 
     tony_models = list((Speaker.models_dir / "tony").glob("*.onnx")) if (Speaker.models_dir / "tony").exists() else []
     if tony_models:

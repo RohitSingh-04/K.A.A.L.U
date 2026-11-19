@@ -7,3 +7,8 @@ __pycache__/
 **/training/
 *.ckpt
 **/checkpoints/
+
+# Security & Device Credentials (encrypted or local secrets)
+device_credentials.json
+**/device_credentials.json
+*device_credentials*.json

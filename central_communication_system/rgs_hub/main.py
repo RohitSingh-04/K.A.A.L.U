@@ -187,11 +187,13 @@ async def build_system_status() -> Dict[str, Any]:
 
     # 6. Connected Android Devices (e.g. OnePlus Phone)
     android_devices = []
+    android_credentials = {"configured": False}
     if AndroidDeviceManager:
         try:
             android_devices = AndroidDeviceManager.get_instance().list_devices_details()
+            android_credentials = AndroidDeviceManager.get_instance().get_credentials_status()
         except Exception as e:
-            print(f"[RGS Hub Warning] Error querying Android devices: {e}")
+            print(f"[RGS Hub Warning] Error querying Android devices/credentials: {e}")
 
     return {
         "status": "success",
@@ -204,6 +206,7 @@ async def build_system_status() -> Dict[str, Any]:
         },
         "connected_devices": android_devices,
         "android_devices": android_devices,
+        "android_credentials": android_credentials,
         "services": services_info,
         "voice": voice_info,
         "llm": llm_info
@@ -456,12 +459,186 @@ async def post_android_emoji(payload: Dict[str, Any]):
     res = mgr.tap_emoji(emoji=str(emoji), serial=payload.get("serial"))
     return res
 
+@app.get("/android/rotation")
+async def get_android_rotation(serial: Optional[str] = None):
+    """Queries screen auto-rotation and orientation lock status."""
+    if not AndroidDeviceManager:
+        raise HTTPException(status_code=503, detail="Android controller module not loaded.")
+    mgr = AndroidDeviceManager.get_instance()
+    return mgr.get_auto_rotate_status(serial=serial)
+
+@app.post("/android/rotation")
+async def post_android_rotation(payload: Dict[str, Any]):
+    """Toggles or locks screen orientation (enabled=False locks portrait mode)."""
+    if not AndroidDeviceManager:
+        raise HTTPException(status_code=503, detail="Android controller module not loaded.")
+    mgr = AndroidDeviceManager.get_instance()
+    enabled = bool(payload.get("enabled", False))
+    return mgr.set_auto_rotate(enabled=enabled, serial=payload.get("serial"))
+
+@app.post("/android/call/answer")
+async def post_android_call_answer(payload: Optional[Dict[str, Any]] = None):
+    """Answers an incoming phone or WhatsApp call."""
+    if not AndroidDeviceManager:
+        raise HTTPException(status_code=503, detail="Android controller module not loaded.")
+    mgr = AndroidDeviceManager.get_instance()
+    serial = (payload or {}).get("serial")
+    return mgr.answer_call(serial=serial)
+
+@app.post("/android/call/end")
+async def post_android_call_end(payload: Optional[Dict[str, Any]] = None):
+    """Ends or hangs up an active phone call."""
+    if not AndroidDeviceManager:
+        raise HTTPException(status_code=503, detail="Android controller module not loaded.")
+    mgr = AndroidDeviceManager.get_instance()
+    serial = (payload or {}).get("serial")
+    return mgr.end_call(serial=serial)
+
+@app.get("/android/contacts")
+async def get_android_contacts(query: str = "", serial: Optional[str] = None):
+    """Searches Android contacts by name or queries all saved contacts."""
+    if not AndroidDeviceManager:
+        raise HTTPException(status_code=503, detail="Android controller module not loaded.")
+    mgr = AndroidDeviceManager.get_instance()
+    contacts = mgr.search_contacts(query=query, serial=serial)
     return {
         "status": "success",
-        "message": f"Updated default LLM to {provider}/{model}",
-        "default_provider": provider,
-        "default_model": model
+        "query": query,
+        "count": len(contacts),
+        "contacts": contacts
     }
+
+@app.post("/android/sms/send")
+async def post_android_sms_send(payload: Dict[str, Any]):
+    """Sends an SMS message to a contact name or phone number."""
+    target = payload.get("target") or payload.get("contact") or payload.get("number")
+    message = payload.get("message") or payload.get("text")
+    if not target or message is None:
+        raise HTTPException(status_code=400, detail="Missing required fields 'target' and 'message'.")
+    if not AndroidDeviceManager:
+        raise HTTPException(status_code=503, detail="Android controller module not loaded.")
+    mgr = AndroidDeviceManager.get_instance()
+    return mgr.send_sms(
+        target=str(target),
+        message=str(message),
+        auto_send=bool(payload.get("auto_send", True)),
+        serial=payload.get("serial")
+    )
+
+@app.get("/android/sms")
+async def get_android_sms(limit: int = 10, serial: Optional[str] = None):
+    """Reads recent incoming SMS messages from the phone inbox."""
+    if not AndroidDeviceManager:
+        raise HTTPException(status_code=503, detail="Android controller module not loaded.")
+    mgr = AndroidDeviceManager.get_instance()
+    return mgr.read_sms(limit=limit, serial=serial)
+
+@app.get("/android/bluetooth")
+async def get_android_bluetooth(serial: Optional[str] = None):
+    """Queries Bluetooth adapter state and lists bonded devices."""
+    if not AndroidDeviceManager:
+        raise HTTPException(status_code=503, detail="Android controller module not loaded.")
+    mgr = AndroidDeviceManager.get_instance()
+    return mgr.get_bluetooth_status(serial=serial)
+
+@app.post("/android/bluetooth")
+async def post_android_bluetooth(payload: Dict[str, Any]):
+    """Enables or disables Bluetooth on the Android device."""
+    if not AndroidDeviceManager:
+        raise HTTPException(status_code=503, detail="Android controller module not loaded.")
+    mgr = AndroidDeviceManager.get_instance()
+    enabled = bool(payload.get("enabled", True))
+    return mgr.set_bluetooth(enabled=enabled, serial=payload.get("serial"))
+
+@app.post("/android/bluetooth/connect")
+async def post_android_bluetooth_connect(payload: Dict[str, Any]):
+    """Connects to a paired Bluetooth device (earbuds, headphones, watch)."""
+    device = payload.get("device") or payload.get("name") or payload.get("address")
+    if not device:
+        raise HTTPException(status_code=400, detail="Missing required field 'device'.")
+    if not AndroidDeviceManager:
+        raise HTTPException(status_code=503, detail="Android controller module not loaded.")
+    mgr = AndroidDeviceManager.get_instance()
+    return mgr.connect_bluetooth_device(device_name_or_address=str(device), serial=payload.get("serial"))
+
+# ----------------- Phone Security & Unlock Credentials Endpoints -----------------
+
+@app.get("/android/credentials")
+@app.get("/api/settings/android/credentials")
+async def get_android_credentials(serial: Optional[str] = None):
+    """Returns phone PIN configuration status without exposing plaintext or ciphertext."""
+    if not AndroidDeviceManager:
+        raise HTTPException(status_code=503, detail="Android controller module not loaded.")
+    mgr = AndroidDeviceManager.get_instance()
+    return mgr.get_credentials_status(serial=serial)
+
+@app.post("/android/credentials")
+@app.post("/api/settings/android/credentials")
+async def post_android_credentials(payload: Dict[str, Any]):
+    """Safely encrypts and stores phone unlock PIN/password using machine-bound encryption (Windows DPAPI)."""
+    pin = payload.get("pin") or payload.get("password")
+    if not pin or not str(pin).strip():
+        raise HTTPException(status_code=400, detail="Missing required field 'pin'.")
+    if not AndroidDeviceManager:
+        raise HTTPException(status_code=503, detail="Android controller module not loaded.")
+    mgr = AndroidDeviceManager.get_instance()
+    return mgr.save_phone_pin(pin=str(pin).strip(), serial=payload.get("serial"))
+
+@app.delete("/android/credentials")
+@app.delete("/api/settings/android/credentials")
+async def delete_android_credentials(serial: Optional[str] = None):
+    """Clears stored phone unlock credentials."""
+    if not AndroidDeviceManager:
+        raise HTTPException(status_code=503, detail="Android controller module not loaded.")
+    mgr = AndroidDeviceManager.get_instance()
+    return mgr.clear_phone_pin(serial=serial)
+
+@app.post("/android/unlock")
+async def post_android_unlock(payload: Optional[Dict[str, Any]] = None):
+    """Executes phone unlock sequence using stored encrypted credentials (or optional one-time pin)."""
+    if not AndroidDeviceManager:
+        raise HTTPException(status_code=503, detail="Android controller module not loaded.")
+    mgr = AndroidDeviceManager.get_instance()
+    p = payload or {}
+    return mgr.unlock_device(pin=p.get("pin"), serial=p.get("serial"))
+
+# ----------------- Windows Phone Link Automation Endpoints -----------------
+
+@app.post("/faulkner/phonelink/call")
+@app.post("/system/phonelink/call")
+async def post_faulkner_phonelink_call(payload: Dict[str, Any]):
+    """Initiates a phone call through Microsoft Phone Link on Windows."""
+    target = payload.get("target") or payload.get("contact") or payload.get("phone_number")
+    if not target:
+        raise HTTPException(status_code=400, detail="Missing required field 'target'.")
+    try:
+        from faulkner_system.phone_link import PhoneLinkController
+        return PhoneLinkController.dial(
+            target=str(target),
+            phone_number=payload.get("phone_number")
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/faulkner/phonelink/open")
+@app.post("/system/phonelink/open")
+async def post_faulkner_phonelink_open():
+    """Opens or activates Microsoft Phone Link on Windows desktop."""
+    try:
+        from faulkner_system.phone_link import PhoneLinkController
+        return PhoneLinkController.open_app()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/faulkner/phonelink/close")
+@app.post("/system/phonelink/close")
+async def post_faulkner_phonelink_close():
+    """Gracefully closes Microsoft Phone Link window (simulating clicking the 'X' button)."""
+    try:
+        from faulkner_system.phone_link import PhoneLinkController
+        return PhoneLinkController.close_app()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/")
 async def root():
@@ -1032,13 +1209,25 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
 
                 mgr = AndroidDeviceManager.get_instance()
                 res = {"success": False, "error": f"Unknown android action: {sub_action}"}
+                serial = payload.get("serial")
                 try:
                     if sub_action == "capture_screenshot":
-                        res = mgr.capture_screenshot(serial=payload.get("serial"))
+                        res = mgr.capture_screenshot(serial=serial)
                     elif sub_action == "tap":
-                        res = mgr.tap(x=int(payload.get("x", 0)), y=int(payload.get("y", 0)), serial=payload.get("serial"))
+                        res = mgr.tap(
+                            x=int(payload.get("x", 0)) if payload.get("x") is not None else None,
+                            y=int(payload.get("y", 0)) if payload.get("y") is not None else None,
+                            target=payload.get("target"),
+                            serial=serial
+                        )
                     elif sub_action == "type":
-                        res = mgr.type_text(text=str(payload.get("text", "")), serial=payload.get("serial"))
+                        res = mgr.type_text(
+                            text=str(payload.get("text", "")),
+                            target=payload.get("target"),
+                            clear=bool(payload.get("clear", False)),
+                            press_enter=bool(payload.get("press_enter", False)),
+                            serial=serial
+                        )
                     elif sub_action == "swipe":
                         res = mgr.swipe(
                             x1=int(payload.get("x1", 0)),
@@ -1046,16 +1235,71 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                             x2=int(payload.get("x2", 0)),
                             y2=int(payload.get("y2", 0)),
                             duration_ms=int(payload.get("duration_ms", 300)),
-                            serial=payload.get("serial")
+                            serial=serial
                         )
-                    elif sub_action == "press_key":
-                        res = mgr.press_key(key=payload.get("key", "HOME"), serial=payload.get("serial"))
-                    elif sub_action == "open_app":
-                        res = mgr.open_app(package=payload.get("package", ""), serial=payload.get("serial"))
-                    elif sub_action == "execute_shell":
-                        res = mgr.shell(command=payload.get("command", ""), serial=payload.get("serial"))
-                    elif sub_action == "get_device_info":
+                    elif sub_action in ("press_key", "key"):
+                        res = mgr.press_key(key=payload.get("key", "HOME"), serial=serial)
+                    elif sub_action in ("open_app", "launch_app"):
+                        res = mgr.open_app(package=payload.get("package", ""), serial=serial)
+                    elif sub_action in ("execute_shell", "shell"):
+                        res = mgr.shell(command=payload.get("command", ""), serial=serial)
+                    elif sub_action in ("get_device_info", "list_devices"):
                         res = {"success": True, "devices": mgr.list_devices_details()}
+                    elif sub_action in ("call_phone", "call"):
+                        res = mgr.call_phone(
+                            target=str(payload.get("target") or payload.get("contact") or payload.get("number", "")),
+                            app=str(payload.get("app", "phone")),
+                            serial=serial
+                        )
+                    elif sub_action in ("answer_call", "accept_call"):
+                        res = mgr.answer_call(serial=serial)
+                    elif sub_action in ("end_call", "hangup"):
+                        res = mgr.end_call(serial=serial)
+                    elif sub_action in ("send_sms", "sms"):
+                        res = mgr.send_sms(
+                            target=str(payload.get("target") or payload.get("contact") or payload.get("number", "")),
+                            message=str(payload.get("message") or payload.get("text", "")),
+                            auto_send=bool(payload.get("auto_send", True)),
+                            serial=serial
+                        )
+                    elif sub_action in ("read_sms", "get_sms"):
+                        res = mgr.read_sms(limit=int(payload.get("limit", 10)), serial=serial)
+                    elif sub_action in ("search_contacts", "contacts"):
+                        res = {
+                            "success": True,
+                            "contacts": mgr.search_contacts(query=str(payload.get("query") or payload.get("name", "")), serial=serial)
+                        }
+                    elif sub_action in ("get_bluetooth_status", "bluetooth_status", "bluetooth"):
+                        res = mgr.get_bluetooth_status(serial=serial)
+                    elif sub_action in ("set_bluetooth", "toggle_bluetooth"):
+                        res = mgr.set_bluetooth(enabled=bool(payload.get("enabled", True)), serial=serial)
+                    elif sub_action in ("connect_bluetooth", "connect_bluetooth_device"):
+                        res = mgr.connect_bluetooth_device(
+                            device_name_or_address=str(payload.get("device") or payload.get("name") or payload.get("address", "")),
+                            serial=serial
+                        )
+                    elif sub_action in ("send_whatsapp", "whatsapp"):
+                        res = mgr.send_whatsapp(
+                            contact=str(payload.get("contact") or payload.get("target", "")),
+                            message=str(payload.get("message", "")),
+                            emoji=payload.get("emoji"),
+                            auto_send=bool(payload.get("auto_send", True)),
+                            serial=serial
+                        )
+                    elif sub_action in ("tap_emoji", "emoji", "gboard_emoji"):
+                        res = mgr.tap_emoji(emoji=str(payload.get("emoji", "laugh")), serial=serial)
+                    elif sub_action in ("set_auto_rotate", "auto_rotate"):
+                        res = mgr.set_auto_rotate(enabled=bool(payload.get("enabled", False)), serial=serial)
+                    elif sub_action in ("get_rotation_status", "rotation_status"):
+                        res = mgr.get_auto_rotate_status(serial=serial)
+                    elif sub_action in ("unlock_device", "unlock", "unlock_phone"):
+                        res = mgr.unlock_device(pin=payload.get("pin"), serial=serial)
+                    elif sub_action in ("get_credentials_status", "credentials_status", "credentials"):
+                        res = mgr.get_credentials_status(serial=serial)
+                    elif sub_action in ("save_credentials", "save_pin"):
+                        res = mgr.save_phone_pin(pin=str(payload.get("pin", "")), serial=serial)
+                    elif sub_action in ("clear_credentials", "clear_pin"):
+                        res = mgr.clear_phone_pin(serial=serial)
                 except Exception as a_err:
                     res = {"success": False, "error": str(a_err)}
 

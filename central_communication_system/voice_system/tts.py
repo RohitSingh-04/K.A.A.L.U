@@ -29,12 +29,7 @@ def get_configured_voice() -> str:
                     return v.strip().lower()
         except Exception:
             pass
-    _models_dir = Path(__file__).resolve().parent / "models"
-    _has_tony = (
-        (_models_dir / "tony").exists()
-        and list((_models_dir / "tony").glob("*.onnx"))
-    )
-    return "tony" if _has_tony else "jarvis"
+    return "jarvis-gb"
 
 
 def save_configured_voice(voice_name: str) -> None:

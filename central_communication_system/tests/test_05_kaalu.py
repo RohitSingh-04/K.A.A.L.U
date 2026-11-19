@@ -283,3 +283,99 @@ async def test_kaalu_identity_inquiry_goal():
     assert "System AI Automation for Fun" in sys_content
     assert "gemini-3.1-flash-lite" in sys_content
 
+
+@pytest.mark.asyncio
+async def test_kaalu_routes_phone_link_call_to_faulkner():
+    """Verify that when user specifies calling via Phone Link, Kaalu delegates to faulkner, NOT android."""
+    orchestrator = KaaluOrchestrator(max_steps=5)
+    orchestrator.ws_client.connect_server = AsyncMock(return_value=True)
+    orchestrator.ws_client.send_task = AsyncMock()
+    orchestrator.ws_client.receive_response = AsyncMock(return_value={
+        "sender": "faulkner",
+        "action": "phone_link_call_result",
+        "payload": {
+            "success": True,
+            "action": "phone_link_call",
+            "app": "Microsoft Phone Link",
+            "contact": "Mom",
+            "phone_number": "+918477873189"
+        }
+    })
+
+    # Step 1: LLM recognizes 'call her using phone link' means delegating to faulkner
+    step_1 = json.dumps({
+        "thought": "The user explicitly asked to call using phone link. According to my routing protocols, Microsoft Phone Link calls on Windows must be delegated to faulkner, not android. From context, 'her' refers to 'Mom'.",
+        "action": "delegate",
+        "recipient": "faulkner",
+        "task_action": "phone_link_call",
+        "payload": {"target": "Mom"}
+    })
+
+    # Step 2: LLM finishes
+    step_2 = json.dumps({
+        "thought": "The call has been initiated through Microsoft Phone Link via Faulkner.",
+        "action": "finish",
+        "final_answer": "Initiated call to Mom through Microsoft Phone Link on your Windows desktop.",
+        "voice_response": "I have initiated the call to your mom using Microsoft Phone Link."
+    })
+
+    orchestrator.llm_client.generate_async = AsyncMock(side_effect=[step_1, step_2])
+
+    result = await orchestrator.process_user_goal("call her using phone link")
+    assert result["status"] == "completed"
+    orchestrator.ws_client.send_task.assert_called_once_with(
+        recipient="faulkner",
+        action="phone_link_call",
+        payload={"target": "Mom"}
+    )
+    assert "Microsoft Phone Link" in result["final_answer"]
+
+
+@pytest.mark.asyncio
+async def test_kaalu_routes_close_phone_link_to_faulkner():
+    """Verify Kaalu closes Phone Link window via faulkner close_phone_link without terminating process."""
+    orchestrator = KaaluOrchestrator(max_steps=5)
+    orchestrator.ws_client.connect_server = AsyncMock(return_value=True)
+    orchestrator.ws_client.send_task = AsyncMock()
+    orchestrator.ws_client.receive_response = AsyncMock(return_value={
+        "sender": "faulkner",
+        "action": "close_phone_link_result",
+        "payload": {
+            "success": True,
+            "action": "close_phone_link",
+            "app": "Microsoft Phone Link",
+            "closed": True,
+            "message": "Closed window without terminating process."
+        }
+    })
+
+    # Step 1: LLM decides to delegate close_phone_link to faulkner
+    step_1 = json.dumps({
+        "thought": "The user wants to close Phone Link window by pressing the close button without terminating it from Task Manager. I will delegate to faulkner with action close_phone_link.",
+        "action": "delegate",
+        "recipient": "faulkner",
+        "task_action": "close_phone_link",
+        "payload": {}
+    })
+
+    # Step 2: LLM finishes
+    step_2 = json.dumps({
+        "thought": "The Phone Link window has been closed and removed from taskbar.",
+        "action": "finish",
+        "final_answer": "I have closed the Microsoft Phone Link window and removed it from your taskbar without terminating the background process.",
+        "voice_response": "I have closed the Phone Link window for you."
+    })
+
+    orchestrator.llm_client.generate_async = AsyncMock(side_effect=[step_1, step_2])
+
+    user_goal = "close the phone link don't terminate it from the task manager just remove it from taskbar by pressing close button"
+    result = await orchestrator.process_user_goal(user_goal)
+    assert result["status"] == "completed"
+    orchestrator.ws_client.send_task.assert_called_once_with(
+        recipient="faulkner",
+        action="close_phone_link",
+        payload={}
+    )
+    assert "closed" in result["final_answer"].lower()
+
+

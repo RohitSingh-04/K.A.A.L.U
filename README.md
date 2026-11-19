@@ -156,91 +156,94 @@ Project KAALU uses a hub-and-spoke multi-agent architecture. **RGS (Runtime Gate
 
 ## Installation & Setup
 
-
-
 ### Prerequisites
 
-\- Windows 10/11
+- Windows 10/11
+- Python 3.10+
+- Node.js & npm (for Resume Builder web frontend)
+- Google Chrome
 
-\- Python 3.10+
+---
 
-\- Google Chrome
+### 1. Download Resume Builder (Companion Web App)
 
+Project KAALU integrates directly with the **CareerForge AI / Resume Builder** application (`http://localhost:5173/`). For seamless integration and automated unified startup, first clone the Resume Builder repository into the **same parent directory** alongside `Project-Kaalu-V2`:
 
-
-### 1. Environment Setup
-
-Clone the repository and create a Python virtual environment:
-
-
+- **Repository Link**: [https://github.com/RohitSingh-04/AI-Resume-Builder.git](https://github.com/RohitSingh-04/AI-Resume-Builder.git) *(or `https://linkedin.com/RohitSingh-04/AI-Resume-Builder.git`)*
 
 ```cmd
+# 1. Navigate to the parent directory containing Project-Kaalu-V2 (e.g. Desktop or your development workspace):
+cd ..
 
-python -m venv .venv
-
-.venv\Scripts\activate
-
-pip install -r requirements.txt
-
+# 2. Clone the Resume Builder into the same folder:
+git clone https://github.com/RohitSingh-04/AI-Resume-Builder.git Resume_Builder_V2
 ```
 
+**Directory Layout:**
+```
+Parent_Folder/
+├── Project-Kaalu-V2/
+└── Resume_Builder_V2/      <-- Cloned AI Resume Builder repository (or AI-Resume-Builder/)
+```
+*(Both folder names `Resume_Builder_V2` and `AI-Resume-Builder` are automatically detected by `start_with_RB.bat`)*
 
+---
 
-### 2. Configuration
+### 2. Environment Setup (Project Kaalu)
+
+Navigate into `Project-Kaalu-V2` and create your Python virtual environment:
+
+```cmd
+cd Project-Kaalu-V2
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+---
+
+### 3. Configuration
 
 Copy or edit `central_communication_system/rgs_hub/settings.yaml` and configure your API keys (or export `GEMINI_API_KEY` in your environment / `.env`):
 
-
-
 ```yaml
-
 llm:
-
-  default_model: "gemini/gemini-2.5-flash"
-
-  timeout: 30
-
+  default_model: "gemini/gemini-2.5-flash"
+  timeout: 30
 ```
 
+---
 
+### 4. Install David Chrome Extension
 
-### 3. Install David Chrome Extension
+1. Open Google Chrome and navigate to `chrome://extensions`.
+2. Toggle on **Developer mode** in the top right.
+3. Click **Load unpacked** and select the folder:
+   ```
+   central_communication_system\david_browser_agent
+   ```
 
-1\. Open Google Chrome and navigate to `chrome://extensions`.
-
-2\. Toggle on ****Developer mode**** in the top right.
-
-3\. Click ****Load unpacked**** and select the folder:
-
-   ```
-
-   central_communication_system\david_browser_agent
-
-   ```
-
-
-
-**---**
-
-
+---
 
 ## Running the System
 
+You have two launch options:
 
-
-To launch all agents, hub, and the interactive terminal at once, run:
-
-
+### Option A: Complete System with Resume Builder (Recommended)
+Launches the full CareerForge AI Resume Builder (Vite frontend on `http://localhost:5173` and FastAPI backend on `http://localhost:8005`) together with Project Kaalu (RGS Central Hub on `:8000`, Faulkner System Agent, and Kaalu Master Orchestrator):
 
 ```cmd
-
-.\start.bat
-
+.\start_with_RB.bat
 ```
 
+### Option B: Project Kaalu Standalone
+Launches only the Project Kaalu agent ecosystem (RGS Hub `:8000`, Faulkner, and Kaalu terminal):
 
+```cmd
+.\start.bat
+```
 
-_>&#x20;_****Note****_: To grant Faulkner full process management permissions (such as closing elevated applications), right-click `start.bat` and choose&#x20;_****Run as administrator****_._
+*> **Note**: To grant Faulkner full process management permissions (such as closing elevated applications like Task Manager), right-click `start_with_RB.bat` or `start.bat` and choose **Run as administrator**.*
 
 
 
@@ -418,7 +421,7 @@ Project KAALU includes a centralized User Profile system accessible across the a
 
 
 
-Project K.A.A.L.U integrates with the standalone Resume Builder web application (`http\://localhost:5173/`) to create, preview, download, and track job-tailored resumes across Kaalu, David, and Faulkner.
+Project K.A.A.L.U integrates with the standalone [CareerForge AI / Resume Builder](https://github.com/RohitSingh-04/AI-Resume-Builder.git) web application (`http://localhost:5173/`) to create, preview, download, and track job-tailored resumes across Kaalu, David, and Faulkner. Keep the repository in the same parent folder alongside `Project-Kaalu-V2` to launch both systems seamlessly via `start_with_RB.bat`.
 
 
 
@@ -526,101 +529,249 @@ Project KAALU features an integrated telemetry dashboard, with RGS (Runtime Gate
 
 ## Android Mobile Device Automation (OnePlus Phone via ADB)
 
-
-
-Project KAALU includes a dedicated mobile device automation subsystem, integrated with the wider agent ecosystem through RGS (Runtime Gateway System), (`central_communication_system/android_controller/`) that interfaces directly with Android Debug Bridge (ADB) located at `C:\Users\rsing\AppData\Local\Android\Sdk\platform-tools\adb.exe` (with automatic fallback to `ADB_PATH` environment variable and system PATH).
-
-
-
-### 1. Device Identification & OnePlus Recognition
-
-\- ****Automatic Recognition****: Recognizes the user's primary mobile device as the ****OnePlus Phone**** (`OnePlus Nord CE 2 5G / IV2201`, `1080x2400 FHD+`, Android 13) connected over Wireless TLS (`adb-AQTWNN8DWSMNG6KJ-vxhPaR.\_adb-tls-connect.\_tcp`) or USB.
-
-\- ****Hardware Telemetry****: Queries battery level, screen dimensions (`wm size`), operating system version, and active focused application window (`dumpsys window`) in real time.
-
-
-
-### 2. Supported Mobile Actions
-
-- **📸 Vision & Screen Capture (`capture_screenshot`)**:
-  - Captures high-resolution screen images via direct binary pipe (`adb exec-out screencap -p`) in ~200ms.
-  - Automatically saves timestamped PNG files to `central_communication_system/data/android_screenshots/screen_<timestamp>.png` and provides base64 image strings for visual analysis.
-
-- **⚡ End-to-End WhatsApp Macro (`send_whatsapp`)**:
-  - Delivers complete WhatsApp messaging in a single turn without exhausting LLM tokens.
-  - Automatically foregrounds WhatsApp, verifies or navigates to the contact chat, types message text, enters requested emojis via Gboard universal typing, and touches Send.
-  - **Voice Recording Prevention Guard**: Features an active guard checking whether the action button is `Send` or `Voice message` (`voice_note_btn`). If the message entry is empty, it strictly avoids tapping fallback coordinates, completely preventing unintentional voice audio recording.
-
-- **📞 High-Speed Phone & WhatsApp Calling (`call_phone`)**:
-  - Native cellular dialing in 0.2s via `android.intent.action.CALL` intent without multi-turn dialing loops.
-  - WhatsApp Voice Calling (`app="whatsapp"`): Navigates directly to the contact and triggers the voice call button in the chat header.
-
-- **😂 Universal Gboard Emoji Search & Typing (`type_gboard_emoji` / `tap_emoji`)**:
-  - In Android, ADB shell `input text` cannot type 4-byte unicode emojis directly.
-  - Kaalu uses Google Gboard's deterministic emoji search: focuses the input field, long-presses the comma `,` key at `[205, 2320]` for 450ms to open Gboard's emoji palette, taps `Search` at `[280, 1280]`, inputs the query keyword (e.g. `laugh`, `smile`, `heart`, `rofl`), and selects the emoji directly from the search grid (e.g. `😂` at `[229, 1213]`).
-  - This eliminates reliance on dynamic Recent Emojis (which shift over time) and guarantees 100% reliable emoji typing universally across all Android apps.
-
-- **🔄 Screen Auto-Rotate & Orientation Lock Control (`set_auto_rotate`, `get_auto_rotate_status`)**:
-  - Queries real-time `accelerometer_rotation` and `user_rotation` system properties.
-  - Allows locking the phone to portrait mode (`set_auto_rotate(enabled=False)`) or toggling auto-rotate (`enabled=True`).
-  - **OxygenOS Auto-Rotate Override Diagnostics**: Diagnoses background packages overriding rotation:
-    - `com.google.android.apps.work.clouddpc` & `com.microsoft.windowsintune.companyportal`: Corporate Work Profiles holding `WRITE_SETTINGS: granted=true`.
-    - `com.aiunit.aon`: OxygenOS Face-based Smart Rotation (auto-adjusts rotation based on front camera face orientation).
-    - `com.oplus.games`: Game Space rotation override policies.
-
-- **👆 Touch & Tap (`tap`)**: Simulates touch taps at exact pixel coordinates (`x`, `y`) or semantic target names (`target="Diya BBA GEHU"`).
-
-- **⌨️ Keyboard & Text Input (`type_text`)**: Automatically sanitizes spaces (`%s`), quotes, and special characters, typing directly into active input fields.
-
-- **↔️ Swipe & Gestures (`swipe`)**: Executes swipe and scroll gestures with custom durations (`swipe(x1, y1, x2, y2, duration_ms)`).
-
-- **🔘 Hardware & Navigation Keys (`press_key`)**: Triggers standard Android key events (`HOME`, `BACK`, `ENTER`, `APP_SWITCH`, `POWER`, `VOLUME_UP`, `VOLUME_DOWN`).
-
-- **🚀 App Launching (`open_app`)**: Launches target application packages (e.g. `com.whatsapp`, `com.android.chrome`, `com.google.android.youtube`).
-
-- **💻 Arbitrary Shell Commands (`shell`)**: Executes raw ADB shell commands on the mobile device.
+Project KAALU includes a dedicated mobile device automation subsystem (`central_communication_system/android_controller/`) integrated with the wider agent ecosystem through RGS (Runtime Gateway System). It interfaces directly with Android Debug Bridge (ADB) located at `C:\Users\rsing\AppData\Local\Android\Sdk\platform-tools\adb.exe` (with automatic fallback to `ADB_PATH` environment variable and system PATH).
 
 ---
 
-### 3. Free Tier Token & Rate-Limit (TPM/RPM) Optimizations
+### 1. Connecting Your Android Phone (OnePlus Setup Guide)
 
-To completely eliminate 429 rate limit errors and prevent token exhaustion on the Gemini Free Tier:
-1. **Dynamic Context Filtering**: Mobile and device tasks dynamically omit the ~3,500 token job application tracking history and full career CV, cutting prompt token consumption by >70% per turn.
-2. **Single-Turn Macro Execution**: Complex mobile operations (`send_whatsapp`, `call_phone`) execute in a single high-speed turn rather than requiring 8-12 conversational reasoning round-trips.
-3. **Screen Observation Pruning**: UI hierarchy dumps are capped to 15 non-empty labels and 10 interactive coordinate elements. Older intermediate history steps are compressed into single-line summaries to eliminate quadratic token growth.
-4. **Intelligent Gemini Fallback Chain**: If a specific model encounters temporary rate limits or high demand, the gateway automatically retries with adaptive exponential backoff and cascades through `gemini-3.1-flash-lite`, `gemini-2.5-flash`, `gemini-2.0-flash`, and `gemini-1.5-flash`.
-
----
-
-### 4. Kaalu Master Orchestrator Delegation (`recipient: 'android'`)
-
-Kaalu seamlessly identifies mobile requests and delegates them to the `android` agent:
-
-- **"Send 'hello' to Diya BBA GEHU on WhatsApp using my phone."** (Executes in 1 turn via `send_whatsapp`)
-- **"Call Diya on WhatsApp using my OnePlus phone."** (Executes in 1 turn via `call_phone`)
-- **"Call 9876543210 from my phone."** (Executes native cellular call via CALL intent)
-- **"Send a laughing emoji to Diya BBA GEHU on WhatsApp."** (Taps emoji via on-screen keyboard)
-- **"Can you see Diya BBA GEHU on the screen of my phone?"** (Inspects screen with confirmed element labels)
-- **"Take a screenshot of my OnePlus phone and tell me what is open."**
+#### Prerequisites
+1. **ADB Installation**: Ensure ADB is present at `C:\Users\rsing\AppData\Local\Android\Sdk\platform-tools\adb.exe` or available in your system PATH.
+2. **Enable Developer Options**:
+   - On your OnePlus phone, go to **Settings > About Device > Version**.
+   - Tap **Build Number** 7 times until you see the confirmation: *"You are now in Developer mode!"*.
+3. **Enable Debugging Settings**:
+   - Navigate to **Settings > Additional Settings > Developer Options**.
+   - Enable **USB Debugging**.
+   - Enable **Wireless Debugging** (for Wi-Fi / cable-free connection).
+   - Enable **Disable Permission Monitoring** (recommended for OxygenOS/ColorOS to allow ADB touch and keyboard input without permission popups).
 
 ---
 
-### 5. REST Endpoints & WebSocket Support
+#### Connection Method A: Wireless TLS Debugging (Default / Recommended)
+Connect your phone and PC to the same Wi-Fi network without requiring a physical USB cable:
+1. On your phone, go to **Settings > Additional Settings > Developer Options > Wireless Debugging**.
+2. Tap **Pair device with pairing code**. Note the IP address, pairing port (e.g. `192.168.1.50:37123`), and the 6-digit Wi-Fi pairing code.
+3. Open your PC terminal and pair:
+   ```cmd
+   adb pair <IP_ADDRESS>:<PAIRING_PORT> <6_DIGIT_CODE>
+   ```
+4. Look at the main *Wireless Debugging* screen for the active connection IP and port (e.g. `192.168.1.50:41255`). Connect to it:
+   ```cmd
+   adb connect <IP_ADDRESS>:<PORT>
+   ```
+5. Verify the connection:
+   ```cmd
+   adb devices -l
+   ```
+   *Expected output:*
+   ```text
+   List of devices attached
+   adb-AQTWNN8DWSMNG6KJ-vxhPaR._adb-tls-connect._tcp   device product:OP555BL1 model:IV2201 device:OP555BL1 transport_id:1
+   ```
 
-| Endpoint | Method | Description |
+---
+
+#### Connection Method B: High-Speed USB Connection
+1. Connect your phone to your PC via a USB-C data cable.
+2. When the USB notification appears, choose **File Transfer** (MTP).
+3. On the phone screen, accept the prompt: **"Allow USB debugging?"** and check **"Always allow from this computer"**.
+4. Verify the attached device:
+   ```cmd
+   adb devices -l
+   ```
+
+---
+
+#### Live Telemetry & Device Monitoring in RGS Settings (`/settings`)
+When an Android device is attached, navigate to `http://localhost:8000/settings` or click the **⚙️ Settings** gear icon in the web interface:
+- **Automatic Device Recognition**: Recognizes your phone as the **OnePlus Phone** (`OnePlus Nord CE 2 5G / IV2201`, `1080x2400 FHD+`, Android 13).
+- **Real-Time Telemetry**: Queries battery level (%), display dimensions, Android version, connection transport (Wireless TLS or USB), and the active focused package/activity (`dumpsys window`).
+- **Hardware Quick Actions**:
+  - `📸 Capture Screenshot`: Grabs a high-resolution screenshot and renders a live interactive preview modal.
+  - `🏠 Home`: Simulates pressing the physical Home key.
+  - `◀ Back`: Simulates pressing the physical Back key.
+  - `📋 Apps`: Opens the Recent Apps switcher.
+
+
+
+### 2. Complete Commands Reference
+
+Project KAALU provides 4 complementary ways to control connected mobile devices:
+
+#### A. Kaalu Natural Language & Voice Commands
+Speak or type these instructions directly into the Kaalu terminal (`start.bat`) or over voice:
+
+| Intent / Goal | Natural Language Prompt Example | Action Taken by Kaalu |
 | :--- | :--- | :--- |
-| `/android/devices` | `GET` | Returns list and telemetry of all connected Android devices |
-| `/android/screenshot` | `GET` | Captures screenshot (returns JSON with base64 and path; pass `raw=true` for binary PNG) |
-| `/android/inspect` | `GET` | Returns parsed UI elements and visible labels |
-| `/android/whatsapp/send` | `POST` | High-speed WhatsApp messaging & emoji macro |
-| `/android/call` | `POST` | High-speed phone call or WhatsApp audio call macro |
-| `/android/emoji` | `POST` | Taps emoji on screen keyboard (`laugh`, `smile`, `heart`, etc.) |
-| `/android/tap` | `POST` | Performs touch tap: `{"x": 540, "y": 1200}` or `{"target": "Contact"}` |
-| `/android/type` | `POST` | Types text: `{"text": "Hello World"}` |
-| `/android/swipe` | `POST` | Performs swipe: `{"x1": 500, "y1": 1800, "x2": 500, "y2": 400, "duration_ms": 300}` |
-| `/android/key` | `POST` | Presses key: `{"key": "HOME"}` |
-| `/android/app/open` | `POST` | Launches application package: `{"package": "com.whatsapp"}` |
-| `/android/shell` | `POST` | Executes ADB shell command: `{"command": "pm list packages -3"}` |
+| **Call Contact by Name** | `"call Mom"` / `"call Diya on my phone"` | Resolves contact name to phone number in contacts database and dials directly on phone via Android `CALL` intent in 0.2s |
+| **Windows Phone Link Call** | `"call her using phone link"` / `"call Mom via Microsoft Phone Link"` | Delegates to **Faulkner**; resolves contact, launches Phone Link on Windows desktop, and dials via `tel:<number>` |
+| **Open Phone Link** | `"open phone link on my PC"` / `"launch link to windows"` | Delegates to **Faulkner**; opens Microsoft Phone Link app (`Microsoft.YourPhone_8wekyb3d8bbwe!App`) on Windows desktop |
+| **Close Phone Link Window** | `"close the phone link don't terminate it from task manager"` / `"remove phone link from taskbar"` | Delegates to **Faulkner**; dispatches `WM_CLOSE` / `CloseMainWindow()` to close window and remove it from taskbar without terminating background process |
+| **Cellular Phone Call** | `"call 9876543210 from my phone"` | Native cellular dial in 0.2s via Android `CALL` intent |
+| **WhatsApp Audio Call** | `"call Diya on WhatsApp using my OnePlus phone"` | Opens chat and triggers voice call button from chat header |
+| **Answer Phone Call** | `"answer the phone"` / `"accept call"` | Accepts incoming phone or WhatsApp call via CALL keyevent & headset hook |
+| **End Active Call** | `"hang up call"` / `"end call on phone"` | Hangs up active call via ENDCALL keyevent |
+| **Send SMS Message** | `"send SMS to Mom saying I will be home soon"` | Resolves contact name, prefills message via `SENDTO` intent, verifies and taps Send |
+| **Read SMS Inbox** | `"read my recent text messages"` / `"what SMS did I receive?"` | Queries SMS inbox content provider and returns recent message texts and senders |
+| **WhatsApp Message** | `"send 'hello' to Diya BBA GEHU on whatsapp using my phone"` | Opens WhatsApp, finds contact, types message, verifies and taps Send in 1 turn |
+| **WhatsApp Emoji** | `"open whatsapp on phone and send laughing emoji to Project X group"` | Navigates to group, searches emoji via Gboard, taps `😂`, verifies Send |
+| **Check Bluetooth** | `"check bluetooth on my phone"` / `"bluetooth status"` | Queries Bluetooth adapter status and lists all bonded/paired devices |
+| **Toggle Bluetooth** | `"turn on bluetooth on phone"` / `"turn off bluetooth"` | Enables or disables Bluetooth adapter via native `cmd bluetooth_manager` |
+| **Connect Bluetooth Device** | `"connect my phone to realme Buds"` | Enables Bluetooth, opens settings, and connects to specified paired earbuds/headphones/watch |
+| **Screen Inspection** | `"can you see Diya BBA GEHU on the screen of my phone?"` | Dumps UI hierarchy and verifies contact labels |
+| **Screen Capture** | `"take a screenshot of my OnePlus phone and tell me what is open"` | Binary screen capture in ~200ms with visual inspection |
+| **Lock Rotation** | `"lock phone rotation to portrait mode"` | Programmatically sets `accelerometer_rotation=0` & `user_rotation=0` |
+| **Rotation Status** | `"what is my phone rotation status?"` | Queries system auto-rotate setting and orientation lock |
+| **Navigation** | `"go to home screen on my phone"` / `"press back on phone"` | Dispatches `input keyevent 3` (HOME) / `keyevent 4` (BACK) |
+| **Launch Apps** | `"open YouTube on phone"` / `"launch Chrome on phone"` | Launches target app package via Android Launcher intent |
+
+---
+
+#### B. Python SDK (`AndroidDeviceManager`)
+Import and invoke `AndroidDeviceManager` directly in custom automation scripts or test suites:
+
+```python
+from android_controller.manager import AndroidDeviceManager
+
+mgr = AndroidDeviceManager()
+
+# 1. Device Discovery & Hardware Telemetry
+devices = mgr.list_devices_details()
+details = mgr.get_device_details() # Returns brand, model, battery level %, resolution, active package
+
+# 2. Vision & UI Hierarchy Inspection
+res = mgr.capture_screenshot(save=True)  # Saves to data/android_screenshots/screen_<timestamp>.png
+ui = mgr.inspect_screen()                # Returns visible_texts and interactive_elements with [x, y]
+elem = mgr.find_element("Diya BBA GEHU") # Locates element bounding box and center coordinate
+
+# 3. High-Speed Macro Actions (Single-Turn Execution)
+# End-to-end WhatsApp messaging & emoji with voice recording prevention guard
+mgr.send_whatsapp(contact="Project X", message="Hello team!", emoji="laugh", auto_send=True)
+
+# Calling: Cellular (with automatic contact name resolution) or WhatsApp voice
+mgr.call_phone(target="Mom", app="phone")             # Resolves 'Mom' to +918477873189 and dials in 0.2s
+mgr.call_phone(target="9876543210", app="phone")      # Direct number dialing
+mgr.call_phone(target="Diya BBA GEHU", app="whatsapp") # WhatsApp voice calling
+mgr.answer_call()                                     # Answers incoming phone/WhatsApp call
+mgr.end_call()                                        # Hangs up active call
+
+# SMS Messaging & Inbox Reading
+mgr.send_sms(target="Mom", message="On my way home", auto_send=True) # Prefills and sends SMS
+sms_list = mgr.read_sms(limit=10)                    # Reads recent incoming SMS messages
+
+# Contacts Search
+contacts = mgr.search_contacts(query="Mom")          # Returns [{name, number, clean_number}]
+
+# Bluetooth Device Management
+bt_status = mgr.get_bluetooth_status()                # Queries state and lists all bonded devices
+mgr.set_bluetooth(enabled=True)                       # Enables Bluetooth adapter
+mgr.connect_bluetooth_device("realme TechLife Buds T100") # Connects to paired earbuds/device
+
+# 4. Universal Gboard Emoji Search & Typing
+# Opens Gboard, taps Search, types keyword ('laugh', 'smile', 'heart'), taps match, restores text mode
+mgr.type_gboard_emoji(emoji="laugh")  # Types 😂 into active text field
+mgr.type_gboard_emoji(emoji="heart")  # Types ❤️ into active text field
+
+# 5. Screen Auto-Rotate & Orientation Lock
+mgr.set_auto_rotate(enabled=False)    # Locks screen in portrait orientation
+status = mgr.get_auto_rotate_status() # {"auto_rotate": False, "is_portrait_locked": True}
+
+# 6. Touch, Typing, Gestures & Key Navigation
+mgr.tap(target="Search")              # Semantic touch tap by visible label
+mgr.tap(x=540, y=1200)                # Coordinate touch tap
+mgr.type_text("Hello World", clear=True)
+mgr.swipe(x1=500, y1=1800, x2=500, y2=400, duration_ms=300) # Scroll down gesture
+mgr.press_key("HOME")                 # "HOME", "BACK", "ENTER", "APP_SWITCH", "POWER", etc.
+mgr.open_app("com.whatsapp")          # Launches package directly
+mgr.shell("pm list packages -3")      # Arbitrary ADB shell command
+
+# 7. Encrypted Phone Security & Unlock Device
+# Saves unlock PIN/password encrypted with Windows DPAPI (machine and user account bound)
+mgr.save_phone_pin(pin="123456")           # Encrypted and saved to data/device_credentials.json
+status = mgr.get_credentials_status()      # {"configured": True, "cipher_method": "win32_dpapi"}
+mgr.unlock_device()                        # Wakes screen, dismisses lockscreen, types PIN, submits ENTER
+mgr.clear_phone_pin()                      # Safely removes stored credentials
+```
+
+---
+
+#### C. REST API Endpoints (RGS Hub `:8000`)
+The Runtime Gateway System exposes complete HTTP endpoints for programmatic mobile automation:
+
+| Endpoint | Method | Request Payload / Query Params | Description |
+| :--- | :--- | :--- | :--- |
+| `/android/devices` | `GET` | — | Lists attached devices with full hardware telemetry & battery % |
+| `/android/screenshot` | `GET` | `?raw=true` (optional) | Captures screenshot; returns JSON or raw binary PNG image |
+| `/android/inspect` | `GET` | — | Dumps active screen UI hierarchy and interactive coordinates |
+| `/android/whatsapp/send` | `POST` | `{"contact": "Diya", "message": "Hi", "emoji": "laugh", "auto_send": true}` | Single-turn WhatsApp message & emoji macro |
+| `/android/call` | `POST` | `{"target": "Mom", "app": "phone"}` | Dials direct cellular call (with contact resolution) or WhatsApp call on phone |
+| `/android/call/answer` | `POST` | — | Answers incoming phone or WhatsApp call via CALL keyevent / headset hook |
+| `/android/call/end` | `POST` | — | Hangs up active call via ENDCALL keyevent |
+| `/faulkner/phonelink/call` | `POST` | `{"target": "Mom"}` | Dials call through Microsoft Phone Link on Windows desktop via `tel:<number>` |
+| `/faulkner/phonelink/open` | `POST` | — | Launches or brings Microsoft Phone Link to the front on Windows |
+| `/faulkner/phonelink/close` | `POST` | — | Gracefully closes Phone Link window (simulating 'X' button) without killing background task |
+| `/android/contacts` | `GET` | `?query=Mom` (optional) | Queries Android contacts database with name, number, and clean number |
+| `/android/sms/send` | `POST` | `{"target": "Mom", "message": "Hello", "auto_send": true}` | Resolves contact name, prefills and sends SMS message |
+| `/android/sms` | `GET` | `?limit=10` (optional) | Reads recent incoming SMS messages from the inbox |
+| `/android/bluetooth` | `GET` | — | Queries Bluetooth adapter status and lists all bonded/paired devices |
+| `/android/bluetooth` | `POST` | `{"enabled": true}` | Turns Bluetooth ON or OFF via `cmd bluetooth_manager` |
+| `/android/bluetooth/connect` | `POST` | `{"device": "realme Buds"}` | Connects to specified paired Bluetooth earbuds/device |
+| `/android/emoji` | `POST` | `{"emoji": "laugh"}` | Types emoji via Gboard deterministic search (`laugh`, `smile`, `heart`, etc.) |
+| `/android/rotation` | `GET` | — | Returns `auto_rotate` state and `is_portrait_locked` boolean |
+| `/android/rotation` | `POST` | `{"enabled": false}` | Sets auto-rotate (`false` locks portrait mode) |
+| `/android/tap` | `POST` | `{"target": "Send"}` or `{"x": 540, "y": 1200}` | Performs touch tap by semantic label or exact coordinate |
+| `/android/type` | `POST` | `{"text": "Hello", "target": "Message", "clear": false}` | Focuses input field and types text |
+| `/android/swipe` | `POST` | `{"x1": 500, "y1": 1800, "x2": 500, "y2": 400}` | Executes swipe or scroll gesture |
+| `/android/key` | `POST` | `{"key": "HOME"}` | Triggers Android key event (`HOME`, `BACK`, `ENTER`, etc.) |
+| `/android/app/open` | `POST` | `{"package": "com.whatsapp"}` | Launches application package |
+| `/android/credentials` | `GET` | — | Returns encryption and PIN configuration status without exposing secrets |
+| `/android/credentials` | `POST` | `{"pin": "123456"}` | Safely encrypts and stores phone unlock PIN/password via Windows DPAPI |
+| `/android/credentials` | `DELETE` | — | Clears stored phone unlock credentials |
+| `/android/unlock` | `POST` | `{"pin": "123456"}` (optional) | Wakes screen and executes unlock sequence with saved PIN or override |
+| `/android/shell` | `POST` | `{"command": "getprop ro.product.model"}` | Executes raw ADB shell command |
+
+---
+
+#### D. Essential ADB Commands Cheat Sheet
+Run these directly in your command line or PowerShell if managing devices manually:
+
+```cmd
+# 1. Device Pairing & Connectivity
+adb pair 192.168.1.X:<PAIRING_PORT> <PAIRING_CODE>
+adb connect 192.168.1.X:<PORT>
+adb devices -l
+adb disconnect
+
+# 2. Vision & Screen Dumps
+adb exec-out screencap -p > screenshot.png
+adb shell uiautomator dump /sdcard/window_dump.xml
+adb shell cat /sdcard/window_dump.xml
+
+# 3. Touch, Typing & Key Simulation
+adb shell input tap 540 1200
+adb shell input swipe 500 1800 500 400 300
+adb shell input text "Hello%sWorld"
+adb shell input keyevent 3     # HOME
+adb shell input keyevent 4     # BACK
+adb shell input keyevent 66    # ENTER
+adb shell input keyevent 187   # RECENTS / APP_SWITCH
+
+# 4. App & Activity Control
+adb shell monkey -p com.whatsapp -c android.intent.category.LAUNCHER 1
+adb shell am force-stop com.whatsapp
+adb shell dumpsys window | grep -E "mCurrentFocus"
+```
+
+---
+
+### 3. Subsystem Architecture & Safeguards
+
+- **Universal Gboard Emoji Search**: Uses Google Gboard's deterministic emoji search (`Q Search` on Gboard) rather than dynamic Recent Emojis. This ensures that emojis like `😂` (laugh), `❤️` (heart), and `👍` (thumbs up) type reliably across all chat applications regardless of user history.
+- **WhatsApp Voice Recording Prevention Guard**: When sending WhatsApp messages, Kaalu explicitly verifies that the Send button is visible before dispatching taps. If the input field is empty and WhatsApp displays the microphone button (`voice_note_btn`), fallback taps are strictly skipped, preventing unintentional voice note recordings.
+- **OxygenOS Auto-Rotate Override Diagnostics**: OxygenOS features *"Face-based Smart Rotation"* (`com.aiunit.aon`) and corporate Work Profile policies (`com.google.android.apps.work.clouddpc`) that can override rotation lock. Kaalu exposes `set_auto_rotate(enabled=False)` to lock portrait mode programmatically.
+- **Token & Rate-Limit (TPM) Optimizations**: Macro actions (`send_whatsapp`, `call_phone`) execute end-to-end in a single turn, and mobile operations dynamically omit job tracking history, cutting token consumption by >70% per turn on the Gemini Free Tier.
+- **Hardware-Encrypted Phone Credentials (Windows DPAPI)**: Phone unlock credentials (PIN / password) are encrypted using Windows Data Protection API (`CryptProtectData`), binding the key to the current machine and user account. Plaintext secrets are never stored on disk and never exposed in REST responses or logs. When the user asks Kaalu to unlock their phone (*"Kaalu, unlock my phone"*), the orchestrator automatically decrypts the PIN in memory and completes the unlock sequence without requiring manual input. Manage or update credentials anytime from the `/settings` web dashboard.
 
 
 

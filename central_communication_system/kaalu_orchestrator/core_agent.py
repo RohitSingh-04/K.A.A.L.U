@@ -282,6 +282,48 @@ class KaaluOrchestrator:
             return {"success": False, "error": "AndroidDeviceManager not initialized."}
         return self.android_mgr.get_auto_rotate_status(serial=serial)
 
+    def android_unlock(self, pin: Optional[str] = None, serial: Optional[str] = None) -> Dict[str, Any]:
+        """Unlocks connected mobile device using stored encrypted credentials or provided PIN."""
+        if not self.android_mgr:
+            return {"success": False, "error": "AndroidDeviceManager not initialized."}
+        return self.android_mgr.unlock_device(pin=pin, serial=serial)
+
+    def android_save_pin(self, pin: str, serial: Optional[str] = None) -> Dict[str, Any]:
+        """Safely saves encrypted phone unlock PIN."""
+        if not self.android_mgr:
+            return {"success": False, "error": "AndroidDeviceManager not initialized."}
+        return self.android_mgr.save_phone_pin(pin=pin, serial=serial)
+
+    def android_credentials_status(self, serial: Optional[str] = None) -> Dict[str, Any]:
+        """Queries phone credentials configuration status."""
+        if not self.android_mgr:
+            return {"success": False, "error": "AndroidDeviceManager not initialized."}
+        return self.android_mgr.get_credentials_status(serial=serial)
+
+    def phone_link_call(self, target: str, phone_number: Optional[str] = None) -> Dict[str, Any]:
+        """Places a phone call via Microsoft Phone Link on Windows."""
+        try:
+            from faulkner_system.phone_link import PhoneLinkController
+            return PhoneLinkController.dial(target=target, phone_number=phone_number)
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def phone_link_open(self) -> Dict[str, Any]:
+        """Opens Microsoft Phone Link application on Windows desktop."""
+        try:
+            from faulkner_system.phone_link import PhoneLinkController
+            return PhoneLinkController.open_app()
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def phone_link_close(self) -> Dict[str, Any]:
+        """Gracefully closes Microsoft Phone Link window (simulating 'X' button) without terminating the process."""
+        try:
+            from faulkner_system.phone_link import PhoneLinkController
+            return PhoneLinkController.close_app()
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
     def _detect_active_model(self) -> str:
         """Determines the current cloud LLM model configured in the RGS Gateway settings."""
         settings_path = Path(__file__).resolve().parent.parent / "rgs_hub" / "settings.yaml"
@@ -642,6 +684,42 @@ class KaaluOrchestrator:
                                     app=str(payload.get("app", "phone")),
                                     serial=serial
                                 )
+                            elif task_action in ("answer_call", "accept_call"):
+                                observation = self.android_mgr.answer_call(serial=serial)
+                            elif task_action in ("end_call", "hangup", "hang_up"):
+                                observation = self.android_mgr.end_call(serial=serial)
+                            elif task_action in ("send_sms", "sms", "send_text"):
+                                observation = self.android_mgr.send_sms(
+                                    target=str(payload.get("target") or payload.get("contact") or payload.get("to") or payload.get("number", "")),
+                                    message=str(payload.get("message") or payload.get("text", "")),
+                                    auto_send=bool(payload.get("auto_send", payload.get("send", True))),
+                                    serial=serial
+                                )
+                            elif task_action in ("read_sms", "get_sms", "list_sms", "inbox_sms"):
+                                observation = self.android_mgr.read_sms(
+                                    limit=int(payload.get("limit", 10)),
+                                    serial=serial
+                                )
+                            elif task_action in ("search_contacts", "find_contact", "get_contacts"):
+                                observation = {
+                                    "success": True,
+                                    "contacts": self.android_mgr.search_contacts(
+                                        query=str(payload.get("query") or payload.get("name", "")),
+                                        serial=serial
+                                    )
+                                }
+                            elif task_action in ("get_bluetooth_status", "bluetooth_status", "bluetooth"):
+                                observation = self.android_mgr.get_bluetooth_status(serial=serial)
+                            elif task_action in ("set_bluetooth", "toggle_bluetooth", "enable_bluetooth", "disable_bluetooth"):
+                                observation = self.android_mgr.set_bluetooth(
+                                    enabled=bool(payload.get("enabled", True)),
+                                    serial=serial
+                                )
+                            elif task_action in ("connect_bluetooth", "connect_bluetooth_device"):
+                                observation = self.android_mgr.connect_bluetooth_device(
+                                    device_name_or_address=str(payload.get("device") or payload.get("name") or payload.get("address", "")),
+                                    serial=serial
+                                )
                             elif task_action in ("tap_emoji", "emoji", "gboard_emoji", "type_gboard_emoji"):
                                 observation = self.android_mgr.type_gboard_emoji(
                                     emoji=str(payload.get("emoji") or payload.get("type", "laugh")),
@@ -655,6 +733,20 @@ class KaaluOrchestrator:
                                 )
                             elif task_action in ("get_rotation_status", "rotation_status"):
                                 observation = self.android_mgr.get_auto_rotate_status(serial=serial)
+                            elif task_action in ("unlock_device", "unlock", "unlock_phone"):
+                                observation = self.android_mgr.unlock_device(
+                                    pin=payload.get("pin"),
+                                    serial=serial
+                                )
+                            elif task_action in ("get_credentials_status", "credentials_status"):
+                                observation = self.android_mgr.get_credentials_status(serial=serial)
+                            elif task_action in ("save_credentials", "save_pin"):
+                                observation = self.android_mgr.save_phone_pin(
+                                    pin=str(payload.get("pin", "")),
+                                    serial=serial
+                                )
+                            elif task_action in ("clear_credentials", "clear_pin"):
+                                observation = self.android_mgr.clear_phone_pin(serial=serial)
                             elif task_action in ("get_device_info", "list_devices", "status"):
                                 devs = self.android_mgr.list_devices_details()
                                 observation = {"success": True, "count": len(devs), "devices": devs}

@@ -757,10 +757,48 @@ class AndroidDeviceManager:
             "status": status
         }
 
+    def search_contacts(self, query: str = "", serial: Optional[str] = None) -> List[Dict[str, str]]:
+        """
+        Searches Android contacts database via ADB content query on com.android.contacts.
+        Returns a list of matching contacts with name, raw number, and sanitized clean_number.
+        """
+        target_serial = self._default_serial(serial)
+        if not target_serial:
+            return []
+
+        res = self._run_adb([
+            "-s", target_serial, "shell", "content", "query",
+            "--uri", "content://com.android.contacts/data/phones",
+            "--projection", "display_name:data1"
+        ])
+        if res.returncode != 0 or not res.stdout:
+            return []
+
+        q = query.strip().lower()
+        matches = []
+        for line in res.stdout.splitlines():
+            m = re.search(r"display_name=(.*?), data1=(.*)", line)
+            if m:
+                name = m.group(1).strip()
+                number = m.group(2).strip()
+                clean_num = re.sub(r"[^\d+]", "", number)
+                if not q or q == name.lower() or q in name.lower():
+                    matches.append({
+                        "name": name,
+                        "number": number,
+                        "clean_number": clean_num
+                    })
+
+        # Sort exact matches first, then shortest names
+        if q:
+            matches.sort(key=lambda x: (x["name"].lower() != q, len(x["name"])))
+        return matches
+
     def call_phone(self, target: str, app: str = "phone", serial: Optional[str] = None) -> Dict[str, Any]:
         """
         Places a phone call or WhatsApp voice call to a phone number or contact name.
-        Uses native high-speed intents to complete in a single action without rate limits.
+        Automatically resolves contact names (e.g. 'Mom', 'Diya') to their saved phone number.
+        Uses native high-speed CALL intent to initiate calling in 0.2s without manual dialer loops.
         """
         target_serial = self._default_serial(serial)
         if not target_serial:
@@ -813,27 +851,287 @@ class AndroidDeviceManager:
 
         else:
             # Cellular Phone Call
-            if clean_digits and len(clean_digits) >= 3:
-                res = self._run_adb(["-s", target_serial, "shell", "am", "start", "-a", "android.intent.action.CALL", "-d", f"tel:{clean_digits}"])
-                if res.returncode != 0:
-                    self._run_adb(["-s", target_serial, "shell", "am", "start", "-a", "android.intent.action.DIAL", "-d", f"tel:{clean_digits}"])
-                return {
-                    "success": True,
-                    "action": "call_phone",
-                    "type": "cellular",
-                    "phone_number": clean_digits,
-                    "target": target
-                }
+            resolved_number = clean_digits
+            contact_name = target
+
+            # If target is a contact name (not purely a number), resolve via contact database
+            if not clean_digits or len(clean_digits) < 3:
+                contacts = self.search_contacts(target, serial=target_serial)
+                if contacts:
+                    resolved_number = contacts[0]["clean_number"]
+                    contact_name = contacts[0]["name"]
+                else:
+                    # Fallback to Contacts app search if not in database
+                    self._run_adb(["-s", target_serial, "shell", "am", "start", "-a", "android.intent.action.VIEW", "content://contacts/people"])
+                    time.sleep(0.5)
+                    self.type_text(target, serial=target_serial)
+                    time.sleep(0.5)
+                    found_elem = self.find_element(target, serial=target_serial)
+                    if found_elem:
+                        self.tap(target=target, serial=target_serial)
+                        time.sleep(0.5)
+                        call_icon = self.find_element("Call", serial=target_serial)
+                        if call_icon:
+                            self._run_adb(["-s", target_serial, "shell", "input", "tap", str(call_icon["center"][0]), str(call_icon["center"][1])])
+                    return {
+                        "success": True,
+                        "action": "call_phone",
+                        "type": "contacts_ui_search",
+                        "target": target
+                    }
+
+            res = self._run_adb(["-s", target_serial, "shell", "am", "start", "-a", "android.intent.action.CALL", "-d", f"tel:{resolved_number}"])
+            if res.returncode != 0:
+                self._run_adb(["-s", target_serial, "shell", "am", "start", "-a", "android.intent.action.DIAL", "-d", f"tel:{resolved_number}"])
+
+            return {
+                "success": True,
+                "action": "call_phone",
+                "type": "cellular",
+                "contact": contact_name,
+                "phone_number": resolved_number,
+                "target": target
+            }
+
+    def answer_call(self, serial: Optional[str] = None) -> Dict[str, Any]:
+        """Answers an incoming phone call or WhatsApp audio call using standard Android CALL keyevent."""
+        target_serial = self._default_serial(serial)
+        if not target_serial:
+            return {"success": False, "error": "No Android device connected."}
+        self.press_key("CALL", serial=target_serial)
+        time.sleep(0.2)
+        self._run_adb(["-s", target_serial, "shell", "input", "keyevent", "79"]) # HEADSETHOOK toggle
+        return {"success": True, "action": "answer_call"}
+
+    def end_call(self, serial: Optional[str] = None) -> Dict[str, Any]:
+        """Ends or hangs up an active phone call using standard Android ENDCALL keyevent."""
+        target_serial = self._default_serial(serial)
+        if not target_serial:
+            return {"success": False, "error": "No Android device connected."}
+        self.press_key("ENDCALL", serial=target_serial)
+        return {"success": True, "action": "end_call"}
+
+    def send_sms(
+        self,
+        target: str,
+        message: str,
+        auto_send: bool = True,
+        serial: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Sends an SMS text message to a contact name or phone number.
+        Automatically resolves contact names to phone numbers via search_contacts.
+        Prefills message using Android's SENDTO intent and verifies/taps Send.
+        """
+        target_serial = self._default_serial(serial)
+        if not target_serial:
+            return {"success": False, "error": "No Android device connected."}
+
+        clean_digits = re.sub(r"[^\d+]", "", target)
+        resolved_number = clean_digits
+        contact_name = target
+
+        if not clean_digits or len(clean_digits) < 3:
+            contacts = self.search_contacts(target, serial=target_serial)
+            if contacts:
+                resolved_number = contacts[0]["clean_number"]
+                contact_name = contacts[0]["name"]
             else:
-                self._run_adb(["-s", target_serial, "shell", "am", "start", "-a", "android.intent.action.VIEW", "content://contacts/people"])
-                time.sleep(0.5)
-                self.type_text(target, serial=target_serial)
                 return {
-                    "success": True,
-                    "action": "call_phone",
-                    "type": "contacts_search",
-                    "target": target
+                    "success": False,
+                    "error": f"Contact '{target}' not found in contacts list."
                 }
+
+        res = self._run_adb([
+            "-s", target_serial, "shell", "am", "start",
+            "-a", "android.intent.action.SENDTO",
+            "-d", f"sms:{resolved_number}",
+            "--es", "sms_body", message
+        ])
+        time.sleep(0.8)
+
+        sent = False
+        if auto_send:
+            h = self.dump_ui_hierarchy(target_serial)
+            send_btn = (
+                self.find_element("Send SMS", serial=target_serial)
+                or self.find_element("send_message_button", serial=target_serial)
+                or self.find_element("send", serial=target_serial)
+            )
+            if send_btn:
+                self._run_adb(["-s", target_serial, "shell", "input", "tap", str(send_btn["center"][0]), str(send_btn["center"][1])])
+                sent = True
+            else:
+                self.press_key("ENTER", serial=target_serial)
+                sent = True
+
+        return {
+            "success": res.returncode == 0,
+            "action": "send_sms",
+            "contact": contact_name,
+            "phone_number": resolved_number,
+            "message": message,
+            "auto_send": auto_send,
+            "verified": sent
+        }
+
+    def read_sms(self, limit: int = 10, serial: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Reads recent SMS messages from Android's SMS inbox content provider.
+        Returns message senders, timestamps, and message bodies.
+        """
+        target_serial = self._default_serial(serial)
+        if not target_serial:
+            return {"success": False, "error": "No Android device connected."}
+
+        res = self._run_adb([
+            "-s", target_serial, "shell", "content", "query",
+            "--uri", "content://sms/inbox",
+            "--projection", "address:body:date"
+        ])
+        if res.returncode != 0:
+            return {"success": False, "error": res.stderr}
+
+        messages = []
+        raw = res.stdout
+        rows = re.split(r"Row:\s*\d+\s+", raw)
+        for r in rows:
+            if not r.strip() or "address=" not in r:
+                continue
+            m = re.search(r"address=(.*?), body=(.*), date=(\d+)", r, re.DOTALL)
+            if m:
+                sender = m.group(1).strip()
+                body = m.group(2).strip()
+                try:
+                    ts_ms = int(m.group(3))
+                    dt_str = datetime.fromtimestamp(ts_ms / 1000.0).strftime("%Y-%m-%d %H:%M:%S")
+                except Exception:
+                    dt_str = "Unknown"
+                    ts_ms = 0
+                messages.append({
+                    "sender": sender,
+                    "body": body,
+                    "date": dt_str,
+                    "timestamp": ts_ms
+                })
+                if len(messages) >= limit:
+                    break
+
+        return {
+            "success": True,
+            "count": len(messages),
+            "messages": messages
+        }
+
+    def get_bluetooth_status(self, serial: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Queries Bluetooth status, adapter state, and paired/bonded devices via dumpsys bluetooth_manager.
+        """
+        target_serial = self._default_serial(serial)
+        if not target_serial:
+            return {"success": False, "error": "No Android device connected."}
+
+        res = self._run_adb(["-s", target_serial, "shell", "dumpsys", "bluetooth_manager"])
+        if res.returncode != 0:
+            return {"success": False, "error": res.stderr}
+
+        lines = res.stdout.splitlines()
+        enabled = False
+        state = "UNKNOWN"
+        device_name = ""
+        bonded = []
+        in_bonded = False
+
+        for line in lines:
+            l = line.strip()
+            if l.startswith("enabled:"):
+                enabled = "true" in l.lower()
+            elif l.startswith("state:"):
+                state = l.split(":", 1)[1].strip()
+            elif l.startswith("name:") and not device_name:
+                device_name = l.split(":", 1)[1].strip()
+            elif "bonded devices:" in l.lower():
+                in_bonded = True
+                continue
+            elif in_bonded:
+                if not l or l.startswith("rec[") or l.startswith("curState="):
+                    in_bonded = False
+                elif in_bonded:
+                    m = re.match(r"([0-9A-Fa-f:]{17})\s*(?:\[(.*?)\])?\s*(.*)", l)
+                    if m:
+                        bonded.append({
+                            "address": m.group(1),
+                            "type": (m.group(2) or "").strip(),
+                            "name": (m.group(3) or "").strip()
+                        })
+
+        return {
+            "success": True,
+            "enabled": enabled,
+            "state": state,
+            "device_name": device_name,
+            "bonded_devices_count": len(bonded),
+            "bonded_devices": bonded
+        }
+
+    def set_bluetooth(self, enabled: bool = True, serial: Optional[str] = None) -> Dict[str, Any]:
+        """Turns device Bluetooth ON or OFF via ADB cmd bluetooth_manager."""
+        target_serial = self._default_serial(serial)
+        if not target_serial:
+            return {"success": False, "error": "No Android device connected."}
+
+        action = "enable" if enabled else "disable"
+        res = self._run_adb(["-s", target_serial, "shell", "cmd", "bluetooth_manager", action])
+        time.sleep(0.5)
+        status = self.get_bluetooth_status(serial=target_serial)
+        return {
+            "success": res.returncode == 0,
+            "action": f"bluetooth_{action}",
+            "enabled": enabled,
+            "status": status
+        }
+
+    def connect_bluetooth_device(self, device_name_or_address: str, serial: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Opens Bluetooth settings and connects to a paired Bluetooth device (headphones, earbuds, watch).
+        """
+        target_serial = self._default_serial(serial)
+        if not target_serial:
+            return {"success": False, "error": "No Android device connected."}
+
+        # 1. Ensure Bluetooth is ON
+        self.set_bluetooth(enabled=True, serial=target_serial)
+
+        # 2. Open Bluetooth Settings
+        self._run_adb(["-s", target_serial, "shell", "am", "start", "-a", "android.settings.BLUETOOTH_SETTINGS"])
+        time.sleep(0.8)
+
+        # 3. Locate and tap device in Bluetooth list
+        h = self.dump_ui_hierarchy(target_serial)
+        target_clean = device_name_or_address.strip().lower()
+        dev_elem = None
+        for elem in h.get("elements", []):
+            label = (elem.get("text") or elem.get("content_desc") or "").lower()
+            if target_clean in label:
+                dev_elem = elem
+                break
+
+        if dev_elem:
+            self._run_adb(["-s", target_serial, "shell", "input", "tap", str(dev_elem["center"][0]), str(dev_elem["center"][1])])
+            time.sleep(0.5)
+            return {
+                "success": True,
+                "action": "connect_bluetooth_device",
+                "device": device_name_or_address,
+                "connected": True
+            }
+
+        return {
+            "success": False,
+            "action": "connect_bluetooth_device",
+            "device": device_name_or_address,
+            "error": f"Device '{device_name_or_address}' not found in active Bluetooth settings screen."
+        }
 
     def send_whatsapp(
         self,
@@ -940,3 +1238,88 @@ class AndroidDeviceManager:
             "auto_send": auto_send,
             "verified": sent
         }
+
+    def unlock_device(self, pin: Optional[str] = None, serial: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Unlocks the Android device.
+        If pin is not provided, automatically retrieves and decrypts the PIN from PhoneCredentialsManager.
+        Sequence:
+          1. Wakes device screen (keyevent 224 / WAKEUP) if asleep.
+          2. Dismisses lockscreen: sends keyevent 82 (MENU) and performs upward swipe gesture (540, 1850 -> 540, 700).
+          3. Enters unlock PIN/password via 'input text <pin>'.
+          4. Submits PIN with keyevent 66 (ENTER).
+          5. Verifies keyguard dismissal.
+        """
+        target_serial = self._default_serial(serial)
+        if not target_serial:
+            return {"success": False, "action": "unlock_device", "error": "No Android device connected."}
+
+        # 1. Resolve PIN
+        unlock_pin = pin
+        if not unlock_pin:
+            try:
+                from android_controller.credentials import PhoneCredentialsManager
+                unlock_pin = PhoneCredentialsManager.get_instance().get_pin(serial=target_serial)
+            except Exception as e:
+                return {"success": False, "action": "unlock_device", "error": f"Failed to retrieve stored credentials: {e}"}
+
+        if not unlock_pin:
+            return {
+                "success": False,
+                "action": "unlock_device",
+                "error": "No unlock PIN/password configured. Please configure your phone PIN in /settings or provide it."
+            }
+
+        # 2. Wake device screen if sleeping
+        pwr_res = self._run_adb(["-s", target_serial, "shell", "dumpsys", "power"], timeout=5.0)
+        pwr_out = pwr_res.stdout or ""
+        is_asleep = "mWakefulness=Asleep" in pwr_out or "mWakefulness=Dozing" in pwr_out
+        if is_asleep or "mWakefulness=Awake" not in pwr_out:
+            self._run_adb(["-s", target_serial, "shell", "input", "keyevent", "224"])
+            time.sleep(0.3)
+
+        # 3. Dismiss lockscreen & reveal PIN entry
+        self._run_adb(["-s", target_serial, "shell", "input", "keyevent", "82"])
+        time.sleep(0.2)
+        self._run_adb(["-s", target_serial, "shell", "input", "swipe", "540", "1850", "540", "700", "250"])
+        time.sleep(0.4)
+
+        # 4. Input the PIN text
+        self._run_adb(["-s", target_serial, "shell", "input", "text", str(unlock_pin)])
+        time.sleep(0.2)
+
+        # 5. Submit PIN via ENTER keyevent (66)
+        self._run_adb(["-s", target_serial, "shell", "input", "keyevent", "66"])
+        time.sleep(0.5)
+
+        # 6. Check lock status
+        win_res = self._run_adb(["-s", target_serial, "shell", "dumpsys", "window"], timeout=5.0)
+        win_out = win_res.stdout or ""
+        unlocked = ("isStatusBarKeyguard=false" in win_out) or ("mShowing=false" in win_out) or ("isKeyguardShowing=false" in win_out)
+
+        return {
+            "success": True,
+            "action": "unlock_device",
+            "serial": target_serial,
+            "verified": unlocked,
+            "message": "Device unlock sequence executed successfully."
+        }
+
+    def get_credentials_status(self, serial: Optional[str] = None) -> Dict[str, Any]:
+        """Returns phone PIN configuration status (without exposing plaintext PIN)."""
+        from android_controller.credentials import PhoneCredentialsManager
+        target_serial = self._default_serial(serial)
+        return PhoneCredentialsManager.get_instance().get_status(serial=target_serial)
+
+    def save_phone_pin(self, pin: str, serial: Optional[str] = None) -> Dict[str, Any]:
+        """Encrypts and saves phone PIN."""
+        from android_controller.credentials import PhoneCredentialsManager
+        target_serial = self._default_serial(serial)
+        return PhoneCredentialsManager.get_instance().save_pin(pin=pin, serial=target_serial)
+
+    def clear_phone_pin(self, serial: Optional[str] = None) -> Dict[str, Any]:
+        """Clears saved phone PIN."""
+        from android_controller.credentials import PhoneCredentialsManager
+        target_serial = self._default_serial(serial)
+        return PhoneCredentialsManager.get_instance().clear_pin(serial=target_serial)
+

@@ -1,3 +1,6 @@
+import os
+os.environ["LITELLM_LOCAL_MODEL_COST_MAP"] = "True"
+
 import base64
 import json
 import subprocess
@@ -7,6 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from android_controller.manager import AndroidDeviceManager, KEY_MAP, DEFAULT_ADB_PATH
+from android_controller.credentials import PhoneCredentialsManager
 from rgs_hub.main import app, build_system_status
 from user_profile.web_ui import render_settings_page
 from kaalu_orchestrator.core_agent import KaaluOrchestrator
@@ -706,5 +710,445 @@ async def test_kaalu_delegates_to_gboard_emoji_and_rotation_control():
             res = await kaalu.process_user_goal("lock phone rotation to portrait")
             assert res["status"] == "completed"
             assert mock_mgr.set_auto_rotate.called
+
+
+def test_search_contacts_and_call_phone_resolution():
+    """Verify contact search parses query output and call_phone resolves contact name to number."""
+    mgr = AndroidDeviceManager(adb_path=DEFAULT_ADB_PATH)
+    mock_contacts_output = (
+        "Row: 0 display_name=Mom, data1=+91 84778 73189\n"
+        "Row: 1 display_name=Diya BBA GEHU, data1=+91 98765 43210\n"
+        "Row: 2 display_name=Papa, data1=+91 99999 88888\n"
+    )
+    commands_executed = []
+
+    def mock_run(args, **kwargs):
+        commands_executed.append(args)
+        cmd_str = " ".join(args)
+        if "content" in cmd_str and "com.android.contacts" in cmd_str:
+            return subprocess.CompletedProcess(args=args, returncode=0, stdout=mock_contacts_output, stderr="")
+        return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
+
+    with patch.object(mgr, "_run_adb", side_effect=mock_run):
+        with patch.object(mgr, "_default_serial", return_value="fake_dev"):
+            # 1. Search contacts
+            results = mgr.search_contacts("Mom")
+            assert len(results) == 1
+            assert results[0]["name"] == "Mom"
+            assert results[0]["clean_number"] == "+918477873189"
+
+            # 2. Call contact by name -> should resolve number and launch CALL intent
+            commands_executed.clear()
+            call_res = mgr.call_phone("Mom")
+            assert call_res["success"] is True
+            assert call_res["type"] == "cellular"
+            assert call_res["contact"] == "Mom"
+            assert call_res["phone_number"] == "+918477873189"
+            assert any("android.intent.action.CALL" in str(cmd) and "tel:+918477873189" in str(cmd) for cmd in commands_executed)
+
+
+def test_answer_and_end_call():
+    """Verify answer_call and end_call send the correct key events."""
+    mgr = AndroidDeviceManager(adb_path=DEFAULT_ADB_PATH)
+    commands_executed = []
+
+    def mock_run(args, **kwargs):
+        commands_executed.append(args)
+        return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
+
+    with patch.object(mgr, "_run_adb", side_effect=mock_run):
+        with patch.object(mgr, "_default_serial", return_value="fake_dev"):
+            # 1. Answer Call
+            ans_res = mgr.answer_call()
+            assert ans_res["success"] is True
+            # Check keyevent CALL (5) and HEADSETHOOK (79)
+            assert any(["input", "keyevent", "5"] == cmd[-3:] for cmd in commands_executed)
+            assert any(["input", "keyevent", "79"] == cmd[-3:] for cmd in commands_executed)
+
+            # 2. End Call
+            commands_executed.clear()
+            end_res = mgr.end_call()
+            assert end_res["success"] is True
+            # Check keyevent ENDCALL (6)
+            assert any(["input", "keyevent", "6"] == cmd[-3:] for cmd in commands_executed)
+
+
+def test_send_and_read_sms():
+    """Verify sending SMS with contact resolution and reading SMS inbox."""
+    mgr = AndroidDeviceManager(adb_path=DEFAULT_ADB_PATH)
+    mock_inbox_output = (
+        "Row: 0 address=+918477873189, body=Hey how are you, date=1700000000000\n"
+        "Row: 1 address=VK-SBI, body=Your OTP is 123456, date=1699999000000\n"
+    )
+    commands_executed = []
+
+    def mock_run(args, **kwargs):
+        commands_executed.append(args)
+        cmd_str = " ".join(args)
+        if "content" in cmd_str and "sms/inbox" in cmd_str:
+            return subprocess.CompletedProcess(args=args, returncode=0, stdout=mock_inbox_output, stderr="")
+        return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
+
+    with patch.object(mgr, "_run_adb", side_effect=mock_run):
+        with patch.object(mgr, "_default_serial", return_value="fake_dev"):
+            with patch.object(mgr, "search_contacts", return_value=[{"name": "Mom", "clean_number": "+918477873189"}]):
+                with patch.object(mgr, "dump_ui_hierarchy", return_value={"elements": []}):
+                    with patch.object(mgr, "find_element", return_value=None):
+                        # Send SMS
+                        sms_res = mgr.send_sms("Mom", "Dinner is ready", auto_send=True)
+                        assert sms_res["success"] is True
+                        assert sms_res["contact"] == "Mom"
+                        assert sms_res["phone_number"] == "+918477873189"
+                        assert any("sms:+918477873189" in str(cmd) for cmd in commands_executed)
+                        assert any("sms_body" in str(cmd) for cmd in commands_executed)
+
+            # Read SMS
+            read_res = mgr.read_sms(limit=5)
+            assert read_res["success"] is True
+            assert read_res["count"] == 2
+            assert read_res["messages"][0]["sender"] == "+918477873189"
+            assert read_res["messages"][0]["body"] == "Hey how are you"
+            assert read_res["messages"][1]["sender"] == "VK-SBI"
+
+
+def test_bluetooth_status_and_control():
+    """Verify querying Bluetooth status, enabling/disabling, and connecting to devices."""
+    mgr = AndroidDeviceManager(adb_path=DEFAULT_ADB_PATH)
+    mock_dumpsys_bt = (
+        "Bluetooth Status\n"
+        "  enabled: true\n"
+        "  state: ON\n"
+        "  address: 48:74:12:34:56:78\n"
+        "  name: OnePlus Nord CE 2 5G\n"
+        "Bonded devices:\n"
+        "  48:74:12:11:22:33 [Classic] realme TechLife Buds T100\n"
+        "  74:45:CE:44:55:66 [BLE] ZEB-BARREL 150\n"
+        "  00:1B:66:77:88:99 Airdopes 441P\n"
+        "rec[0]: time=...\n"
+    )
+    commands_executed = []
+
+    def mock_run(args, **kwargs):
+        commands_executed.append(args)
+        cmd_str = " ".join(args)
+        if "dumpsys" in cmd_str and "bluetooth_manager" in cmd_str:
+            return subprocess.CompletedProcess(args=args, returncode=0, stdout=mock_dumpsys_bt, stderr="")
+        return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
+
+    with patch.object(mgr, "_run_adb", side_effect=mock_run):
+        with patch.object(mgr, "_default_serial", return_value="fake_dev"):
+            # 1. Get Bluetooth Status
+            status = mgr.get_bluetooth_status()
+            assert status["success"] is True
+            assert status["enabled"] is True
+            assert status["state"] == "ON"
+            assert status["device_name"] == "OnePlus Nord CE 2 5G"
+            assert status["bonded_devices_count"] == 3
+            assert status["bonded_devices"][0]["name"] == "realme TechLife Buds T100"
+            assert status["bonded_devices"][1]["name"] == "ZEB-BARREL 150"
+
+            # 2. Set Bluetooth enable / disable
+            commands_executed.clear()
+            mgr.set_bluetooth(enabled=True)
+            assert any(["cmd", "bluetooth_manager", "enable"] == cmd[-3:] for cmd in commands_executed)
+
+            commands_executed.clear()
+            mgr.set_bluetooth(enabled=False)
+            assert any(["cmd", "bluetooth_manager", "disable"] == cmd[-3:] for cmd in commands_executed)
+
+            # 3. Connect Bluetooth Device
+            commands_executed.clear()
+            mock_ui = {
+                "elements": [
+                    {"text": "realme TechLife Buds T100", "center": [400, 600], "clickable": True}
+                ]
+            }
+            with patch.object(mgr, "dump_ui_hierarchy", return_value=mock_ui):
+                conn_res = mgr.connect_bluetooth_device("realme TechLife Buds T100")
+                assert conn_res["success"] is True
+                assert conn_res["connected"] is True
+                assert any(["input", "tap", "400", "600"] == cmd[-4:] for cmd in commands_executed)
+
+
+def test_api_call_sms_and_bluetooth_endpoints(client):
+    """Test REST API endpoints for calls, contacts, SMS, and Bluetooth."""
+    with patch("rgs_hub.main.AndroidDeviceManager.get_instance") as mock_mgr_cls:
+        mock_inst = MagicMock()
+        mock_inst.answer_call.return_value = {"success": True, "action": "answer_call"}
+        mock_inst.end_call.return_value = {"success": True, "action": "end_call"}
+        mock_inst.search_contacts.return_value = [{"name": "Mom", "number": "+918477873189", "clean_number": "+918477873189"}]
+        mock_inst.send_sms.return_value = {"success": True, "action": "send_sms", "contact": "Mom", "verified": True}
+        mock_inst.read_sms.return_value = {"success": True, "count": 1, "messages": [{"sender": "Mom", "body": "Hi"}]}
+        mock_inst.get_bluetooth_status.return_value = {"success": True, "enabled": True, "bonded_devices": []}
+        mock_inst.set_bluetooth.return_value = {"success": True, "action": "bluetooth_enable", "enabled": True}
+        mock_inst.connect_bluetooth_device.return_value = {"success": True, "action": "connect_bluetooth_device", "connected": True}
+        mock_mgr_cls.return_value = mock_inst
+
+        # 1. Call answer and end
+        r_ans = client.post("/android/call/answer")
+        assert r_ans.status_code == 200
+        assert r_ans.json()["action"] == "answer_call"
+
+        r_end = client.post("/android/call/end")
+        assert r_end.status_code == 200
+        assert r_end.json()["action"] == "end_call"
+
+        # 2. Contacts search
+        r_contacts = client.get("/android/contacts?query=Mom")
+        assert r_contacts.status_code == 200
+        assert r_contacts.json()["count"] == 1
+
+        # 3. SMS send and read
+        r_sms_send = client.post("/android/sms/send", json={"target": "Mom", "message": "hello"})
+        assert r_sms_send.status_code == 200
+        assert r_sms_send.json()["verified"] is True
+
+        r_sms_read = client.get("/android/sms?limit=5")
+        assert r_sms_read.status_code == 200
+        assert r_sms_read.json()["count"] == 1
+
+        # 4. Bluetooth status, toggle, and connect
+        r_bt_status = client.get("/android/bluetooth")
+        assert r_bt_status.status_code == 200
+        assert r_bt_status.json()["enabled"] is True
+
+        r_bt_set = client.post("/android/bluetooth", json={"enabled": True})
+        assert r_bt_set.status_code == 200
+
+        r_bt_conn = client.post("/android/bluetooth/connect", json={"device": "realme Buds"})
+        assert r_bt_conn.status_code == 200
+        assert r_bt_conn.json()["connected"] is True
+
+
+@pytest.mark.asyncio
+async def test_kaalu_delegates_to_call_sms_and_bluetooth():
+    """Verify Kaalu orchestrator delegates calling, SMS, and Bluetooth tasks directly to Android manager."""
+    mock_mgr = MagicMock()
+    mock_mgr.list_devices_details.return_value = []
+    mock_mgr.call_phone.return_value = {"success": True, "action": "call_phone", "type": "cellular", "contact": "Mom", "phone_number": "+918477873189"}
+    mock_mgr.send_sms.return_value = {"success": True, "action": "send_sms", "contact": "Mom", "verified": True}
+    mock_mgr.read_sms.return_value = {"success": True, "count": 1, "messages": [{"sender": "Mom", "body": "Dinner ready"}]}
+    mock_mgr.get_bluetooth_status.return_value = {"success": True, "enabled": True, "bonded_devices": [{"name": "realme Buds"}]}
+    mock_mgr.connect_bluetooth_device.return_value = {"success": True, "action": "connect_bluetooth_device", "connected": True}
+
+    kaalu = KaaluOrchestrator(android_manager=mock_mgr)
+
+    step1_call = json.dumps({
+        "thought": "Calling Mom using call_phone.",
+        "action": "delegate",
+        "recipient": "android",
+        "task_action": "call_phone",
+        "payload": {"target": "Mom", "app": "phone"}
+    })
+    step2_finish = json.dumps({
+        "thought": "Call initiated.",
+        "action": "finish",
+        "final_answer": "Calling Mom now.",
+        "voice_response": "Calling Mom now."
+    })
+
+    with patch.object(kaalu.ws_client, "connect_server", new_callable=AsyncMock):
+        with patch.object(kaalu.llm_client, "generate_async", side_effect=[step1_call, step2_finish]):
+            res = await kaalu.process_user_goal("call Mom")
+            assert res["status"] == "completed"
+            assert mock_mgr.call_phone.called
+
+    # Test send SMS delegation
+    step1_sms = json.dumps({
+        "thought": "Sending SMS to Mom.",
+        "action": "delegate",
+        "recipient": "android",
+        "task_action": "send_sms",
+        "payload": {"target": "Mom", "message": "I will be home soon"}
+    })
+    with patch.object(kaalu.ws_client, "connect_server", new_callable=AsyncMock):
+        with patch.object(kaalu.llm_client, "generate_async", side_effect=[step1_sms, step2_finish]):
+            res = await kaalu.process_user_goal("send SMS to Mom saying I will be home soon")
+            assert res["status"] == "completed"
+            assert mock_mgr.send_sms.called
+
+    # Test connect bluetooth delegation
+    step1_bt = json.dumps({
+        "thought": "Connecting to realme Buds.",
+        "action": "delegate",
+        "recipient": "android",
+        "task_action": "connect_bluetooth",
+        "payload": {"device": "realme Buds"}
+    })
+    with patch.object(kaalu.ws_client, "connect_server", new_callable=AsyncMock):
+        with patch.object(kaalu.llm_client, "generate_async", side_effect=[step1_bt, step2_finish]):
+            res = await kaalu.process_user_goal("connect my phone to realme Buds")
+            assert res["status"] == "completed"
+            assert mock_mgr.connect_bluetooth_device.called
+
+
+# 8. Encrypted Phone Credentials & Unlock Device Tests
+def test_phone_credentials_manager_lifecycle(tmp_path):
+    """Verify encrypted storage, retrieval, and clearing of phone credentials."""
+    creds_file = tmp_path / "test_device_credentials.json"
+    mgr = PhoneCredentialsManager(storage_path=creds_file)
+
+    # Initial state
+    status0 = mgr.get_status()
+    assert status0["configured"] is False
+    assert mgr.get_pin() is None
+
+    # Save PIN
+    res = mgr.save_pin("123456", serial="device-oneplus-1")
+    assert res["success"] is True
+    assert res["configured"] is True
+    assert res["pin_length"] == 6
+
+    # Verify status does not leak plaintext PIN
+    status1 = mgr.get_status()
+    assert status1["configured"] is True
+    assert status1["pin_length"] == 6
+    assert "pin" not in status1
+    assert "ciphertext" not in status1
+
+    # Verify decrypt retrieves correct PIN
+    pin_retrieved = mgr.get_pin(serial="device-oneplus-1")
+    assert pin_retrieved == "123456"
+
+    # Default fallback retrieval
+    default_retrieved = mgr.get_pin()
+    assert default_retrieved == "123456"
+
+    # Clear PIN
+    clr = mgr.clear_pin()
+    assert clr["success"] is True
+    assert mgr.get_status()["configured"] is False
+    assert mgr.get_pin() is None
+
+
+def test_android_device_unlock_with_and_without_credentials(tmp_path):
+    """Verify AndroidDeviceManager.unlock_device behavior with stored vs missing credentials."""
+    creds_file = tmp_path / "test_device_credentials.json"
+    creds_mgr = PhoneCredentialsManager(storage_path=creds_file)
+    dev_mgr = AndroidDeviceManager(adb_path=DEFAULT_ADB_PATH)
+
+    mock_devices = [{"serial": "oneplus-serial", "state": "device"}]
+
+    with patch.object(dev_mgr, "list_devices", return_value=mock_devices):
+        with patch.object(PhoneCredentialsManager, "get_instance", return_value=creds_mgr):
+            # 1. No credentials configured -> returns error
+            res_fail = dev_mgr.unlock_device()
+            assert res_fail["success"] is False
+            assert "No unlock PIN/password configured" in res_fail["error"]
+
+            # 2. Save credentials
+            creds_mgr.save_pin("654321")
+
+            # 3. Simulate ADB calls during unlock
+            executed_cmds = []
+
+            def fake_run_adb(args, timeout=15.0, check=False, binary=False):
+                cmd_str = " ".join(args)
+                executed_cmds.append(cmd_str)
+                if "dumpsys power" in cmd_str:
+                    return subprocess.CompletedProcess(args, returncode=0, stdout="mWakefulness=Asleep\n", stderr="")
+                elif "dumpsys window" in cmd_str:
+                    return subprocess.CompletedProcess(args, returncode=0, stdout="isStatusBarKeyguard=false\n", stderr="")
+                return subprocess.CompletedProcess(args, returncode=0, stdout="", stderr="")
+
+            with patch.object(dev_mgr, "_run_adb", side_effect=fake_run_adb):
+                res_success = dev_mgr.unlock_device()
+                assert res_success["success"] is True
+                assert res_success["verified"] is True
+
+                # Verify execution sequence: wakeup (224), menu (82), swipe, input text (654321), enter (66)
+                all_cmds_str = " ".join(executed_cmds)
+                assert "keyevent 224" in all_cmds_str
+                assert "keyevent 82" in all_cmds_str
+                assert "swipe 540 1850 540 700 250" in all_cmds_str
+                assert "input text 654321" in all_cmds_str
+                assert "keyevent 66" in all_cmds_str
+
+
+def test_api_phone_credentials_and_unlock(client, tmp_path):
+    """Verify REST API endpoints for phone credentials management and unlocking."""
+    creds_file = tmp_path / "api_creds.json"
+    test_creds_mgr = PhoneCredentialsManager(storage_path=creds_file)
+
+    with patch.object(PhoneCredentialsManager, "get_instance", return_value=test_creds_mgr):
+        # 1. GET /android/credentials
+        r_get = client.get("/android/credentials")
+        assert r_get.status_code == 200
+        assert r_get.json()["configured"] is False
+
+        # 2. POST /android/credentials validation
+        r_empty = client.post("/android/credentials", json={"pin": ""})
+        assert r_empty.status_code == 400
+
+        # 3. POST /android/credentials save
+        r_save = client.post("/android/credentials", json={"pin": "246810"})
+        assert r_save.status_code == 200
+        assert r_save.json()["success"] is True
+
+        # 4. GET /android/credentials verify configured
+        r_get2 = client.get("/android/credentials")
+        assert r_get2.status_code == 200
+        data2 = r_get2.json()
+        assert data2["configured"] is True
+        assert data2["pin_length"] == 6
+        assert "pin" not in data2
+
+        # 5. POST /android/unlock
+        with patch.object(AndroidDeviceManager, "unlock_device", return_value={"success": True, "action": "unlock_device", "verified": True}):
+            r_unlock = client.post("/android/unlock", json={})
+            assert r_unlock.status_code == 200
+            assert r_unlock.json()["success"] is True
+
+        # 6. DELETE /android/credentials
+        r_del = client.delete("/android/credentials")
+        assert r_del.status_code == 200
+        assert r_del.json()["success"] is True
+
+        r_get3 = client.get("/android/credentials")
+        assert r_get3.json()["configured"] is False
+
+
+def test_render_settings_page_contains_phone_security():
+    """Verify settings HTML dashboard includes Phone Security & Unlock PIN section."""
+    html_out = render_settings_page()
+    assert "Phone Security &amp; Unlock PIN" in html_out or "Phone Security & Unlock PIN" in html_out
+    assert "phonePinInput" in html_out
+    assert "savePhonePin" in html_out
+    assert "testUnlockPhone" in html_out
+
+
+@pytest.mark.asyncio
+async def test_kaalu_delegates_to_unlock_device():
+    """Verify KaaluOrchestrator delegates to Android unlock_device on prompt 'unlock my phone'."""
+    mock_mgr = MagicMock()
+    mock_mgr.unlock_device.return_value = {
+        "success": True,
+        "action": "unlock_device",
+        "verified": True,
+        "message": "Device unlocked successfully."
+    }
+
+    kaalu = KaaluOrchestrator(android_manager=mock_mgr)
+
+    step1_unlock = json.dumps({
+        "thought": "The user wants to unlock their phone. I will delegate to android with unlock_device.",
+        "action": "delegate",
+        "recipient": "android",
+        "task_action": "unlock_device",
+        "payload": {}
+    })
+    step2_finish = json.dumps({
+        "thought": "The phone has been unlocked.",
+        "action": "finish",
+        "final_answer": "Your phone has been successfully unlocked.",
+        "voice_response": "I have unlocked your phone."
+    })
+
+    with patch.object(kaalu.ws_client, "connect_server", new_callable=AsyncMock):
+        with patch.object(kaalu.llm_client, "generate_async", side_effect=[step1_unlock, step2_finish]):
+            res = await kaalu.process_user_goal("unlock my phone")
+            assert res["status"] == "completed"
+            assert mock_mgr.unlock_device.called
+
 
 
