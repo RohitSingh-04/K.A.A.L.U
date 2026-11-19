@@ -16,6 +16,11 @@ from user_profile import (
     render_edit_page,
     build_user_profile_from_dict,
 )
+from job_tracker import (
+    JobTrackerManager,
+    JobApplicationRecord,
+    ResumeSnapshot,
+)
 
 app = FastAPI(title="RGS Central Gateway & Communication Hub", version="2.0.0")
 
@@ -329,6 +334,114 @@ async def remove_skill_category_via_post(payload: Dict[str, Any]):
         raise HTTPException(status_code=400, detail="Missing 'category_name' in payload.")
     return await delete_skill_category(cat_name)
 
+@app.post("/job/resume/save")
+async def save_job_resume(payload: Dict[str, Any]):
+    """
+    Saves a generated/downloaded resume file into the structured date folder:
+    data/resumes/YYYY-MM-DD/<Company>_<Position>_Resume_<timestamp>.pdf
+    and automatically updates user_profile.json's resume_path.
+    """
+    company = payload.get("company")
+    position = payload.get("position")
+    if not company or not position:
+        raise HTTPException(status_code=400, detail="Missing required fields: 'company' and 'position'.")
+
+    source_path = payload.get("source_path")
+    move = bool(payload.get("move", False))
+
+    tracker = JobTrackerManager.get_instance()
+    try:
+        dest_path, dest_filename = tracker.save_downloaded_resume(
+            company=company,
+            position=position,
+            source_path=source_path,
+            move=move
+        )
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to save resume: {str(e)}")
+
+    return {
+        "status": "success",
+        "message": f"Resume successfully stored under date directory for {company} - {position}",
+        "resume_path": str(dest_path),
+        "resume_filename": dest_filename,
+        "date_folder": dest_path.parent.name
+    }
+
+@app.post("/job/applied")
+async def record_job_application(payload: Dict[str, Any]):
+    """
+    Records a job application or marks an existing one as applied,
+    storing the target job metadata, applied date, and linking the exact resume file and snapshot.
+    """
+    tracker = JobTrackerManager.get_instance()
+
+    identifier = payload.get("application_id") or payload.get("identifier")
+    if identifier:
+        rec = tracker.mark_as_applied(
+            identifier=identifier,
+            job_url=payload.get("job_url"),
+            notes=payload.get("notes")
+        )
+        if rec:
+            return {
+                "status": "success",
+                "message": f"Job application '{rec.company} - {rec.position}' marked as applied.",
+                "application": rec.model_dump()
+            }
+
+    company = payload.get("company")
+    position = payload.get("position")
+    if not company or not position:
+        raise HTTPException(status_code=400, detail="Missing required fields: 'company' and 'position'.")
+
+    rec = tracker.record_job_application(
+        company=company,
+        position=position,
+        job_description=payload.get("job_description"),
+        job_url=payload.get("job_url"),
+        location=payload.get("location"),
+        resume_path=payload.get("resume_path"),
+        resume_snapshot=payload.get("resume_snapshot"),
+        status=payload.get("status", "applied"),
+        applied_date=payload.get("applied_date"),
+        notes=payload.get("notes"),
+        metadata=payload.get("metadata")
+    )
+    return {
+        "status": "success",
+        "message": f"Job application recorded for {company} - {position}.",
+        "application": rec.model_dump()
+    }
+
+@app.get("/job/applications")
+async def list_job_applications(
+    status: Optional[str] = Query(None),
+    company: Optional[str] = Query(None)
+):
+    """Lists all tracked job applications with optional status and company filtering."""
+    tracker = JobTrackerManager.get_instance()
+    records = tracker.list_applications(status=status, company=company)
+    return {
+        "status": "success",
+        "count": len(records),
+        "applications": [r.model_dump() for r in records]
+    }
+
+@app.get("/job/applications/{application_id}")
+async def get_job_application(application_id: str):
+    """Retrieves a single job application record by application_id."""
+    tracker = JobTrackerManager.get_instance()
+    rec = tracker.get_application(application_id)
+    if not rec:
+        raise HTTPException(status_code=404, detail=f"Job application '{application_id}' not found.")
+    return {
+        "status": "success",
+        "application": rec.model_dump()
+    }
+
 @app.websocket("/ws/{client_id}")
 async def websocket_endpoint(websocket: WebSocket, client_id: str):
     """
@@ -355,6 +468,96 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                     "sender": "rgs_hub",
                     "action": "user_profile_data",
                     "payload": profile.model_dump() if profile else None
+                })
+                continue
+
+            if raw_data.get("action") == "save_job_resume":
+                payload = raw_data.get("payload", {})
+                company = payload.get("company", "")
+                position = payload.get("position", "")
+                src_path = payload.get("source_path")
+                tracker = JobTrackerManager.get_instance()
+                try:
+                    dest_p, dest_name = tracker.save_downloaded_resume(
+                        company=company,
+                        position=position,
+                        source_path=src_path
+                    )
+                    await websocket.send_json({
+                        "recipient": client_id,
+                        "sender": "rgs_hub",
+                        "action": "job_resume_saved",
+                        "payload": {
+                            "status": "success",
+                            "resume_path": str(dest_p),
+                            "resume_filename": dest_name
+                        }
+                    })
+                except Exception as save_err:
+                    await websocket.send_json({
+                        "recipient": client_id,
+                        "sender": "rgs_hub",
+                        "action": "job_resume_saved",
+                        "payload": {
+                            "status": "error",
+                            "error": str(save_err)
+                        }
+                    })
+                continue
+
+            if raw_data.get("action") == "record_job_application":
+                payload = raw_data.get("payload", {})
+                tracker = JobTrackerManager.get_instance()
+                try:
+                    rec = tracker.record_job_application(
+                        company=payload.get("company", ""),
+                        position=payload.get("position", ""),
+                        job_description=payload.get("job_description"),
+                        job_url=payload.get("job_url"),
+                        location=payload.get("location"),
+                        resume_path=payload.get("resume_path"),
+                        resume_snapshot=payload.get("resume_snapshot"),
+                        status=payload.get("status", "applied"),
+                        notes=payload.get("notes"),
+                        metadata=payload.get("metadata")
+                    )
+                    await websocket.send_json({
+                        "recipient": client_id,
+                        "sender": "rgs_hub",
+                        "action": "job_application_recorded",
+                        "payload": {
+                            "status": "success",
+                            "application": rec.model_dump()
+                        }
+                    })
+                except Exception as rec_err:
+                    await websocket.send_json({
+                        "recipient": client_id,
+                        "sender": "rgs_hub",
+                        "action": "job_application_recorded",
+                        "payload": {
+                            "status": "error",
+                            "error": str(rec_err)
+                        }
+                    })
+                continue
+
+            if raw_data.get("action") == "get_job_applications":
+                payload = raw_data.get("payload", {})
+                tracker = JobTrackerManager.get_instance()
+                apps = tracker.list_applications(
+                    status=payload.get("status"),
+                    company=payload.get("company")
+                )
+                await websocket.send_json({
+                    "recipient": client_id,
+                    "sender": "rgs_hub",
+                    "action": "job_applications_data",
+                    "payload": {
+                        "status": "success",
+                        "count": len(apps),
+                        "applications": [a.model_dump() for a in apps]
+                    }
                 })
                 continue
 

@@ -25,6 +25,17 @@ except (ImportError, ValueError):
         except (ImportError, ValueError):
             ProfileManager = None
 
+try:
+    from job_tracker.manager import JobTrackerManager
+except (ImportError, ValueError):
+    try:
+        from ..job_tracker.manager import JobTrackerManager
+    except (ImportError, ValueError):
+        try:
+            from central_communication_system.job_tracker.manager import JobTrackerManager
+        except (ImportError, ValueError):
+            JobTrackerManager = None
+
 from kaalu_orchestrator.prompts import KAALU_SYSTEM_PROMPT
 from kaalu_orchestrator.ws_client import KaaluWSClient
 from kaalu_orchestrator.rgs_llm_client import RGSLLMClient
@@ -42,7 +53,8 @@ class KaaluOrchestrator:
         gateway_url: str = "http://localhost:8000/llm/generate",
         max_steps: int = 15,
         max_history_turns: int = 10,
-        profile_manager: Optional[Any] = None
+        profile_manager: Optional[Any] = None,
+        job_tracker: Optional[Any] = None
     ):
         self.llm_client = RGSLLMClient(gateway_url=gateway_url)
         self.ws_client = KaaluWSClient(uri=ws_uri)
@@ -55,6 +67,85 @@ class KaaluOrchestrator:
             self.profile_manager = ProfileManager.get_instance()
         else:
             self.profile_manager = None
+
+        if job_tracker is not None:
+            self.job_tracker = job_tracker
+        elif JobTrackerManager is not None:
+            self.job_tracker = JobTrackerManager.get_instance()
+        else:
+            self.job_tracker = None
+
+    def save_downloaded_resume(
+        self,
+        company: str,
+        position: str,
+        source_path: Optional[str] = None,
+        move: bool = False
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Saves a downloaded resume file to date-structured storage (data/resumes/YYYY-MM-DD/),
+        and automatically synchronizes the user profile's resume_path.
+        """
+        if not self.job_tracker:
+            print("[Kaalu Warning] JobTrackerManager not initialized.")
+            return None
+        dest_path, dest_filename = self.job_tracker.save_downloaded_resume(
+            company=company,
+            position=position,
+            source_path=source_path,
+            move=move
+        )
+        return {
+            "status": "success",
+            "resume_path": str(dest_path),
+            "resume_filename": dest_filename,
+            "date_folder": dest_path.parent.name
+        }
+
+    def record_applied_job(
+        self,
+        company: str,
+        position: str,
+        job_description: Optional[str] = None,
+        job_url: Optional[str] = None,
+        location: Optional[str] = None,
+        resume_path: Optional[str] = None,
+        resume_snapshot: Optional[Dict[str, Any]] = None,
+        notes: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
+        """Records a job application record and saves its snapshot to central storage."""
+        if not self.job_tracker:
+            print("[Kaalu Warning] JobTrackerManager not initialized.")
+            return None
+        rec = self.job_tracker.record_job_application(
+            company=company,
+            position=position,
+            job_description=job_description,
+            job_url=job_url,
+            location=location,
+            resume_path=resume_path,
+            resume_snapshot=resume_snapshot,
+            status="applied",
+            notes=notes
+        )
+        return rec.model_dump()
+
+    def mark_job_applied(
+        self,
+        identifier: str,
+        job_url: Optional[str] = None,
+        notes: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
+        """Marks an existing tracked job application as applied."""
+        if not self.job_tracker:
+            print("[Kaalu Warning] JobTrackerManager not initialized.")
+            return None
+        rec = self.job_tracker.mark_as_applied(
+            identifier=identifier,
+            job_url=job_url,
+            notes=notes
+        )
+        return rec.model_dump() if rec else None
 
     def reset_session(self):
         """Clear multi-turn session history."""
@@ -126,6 +217,20 @@ class KaaluOrchestrator:
                         f"Current Verified User Information:\n{profile_context}\n\n"
                         "CRITICAL: Use this profile data to personalize all searches, job filtering, "
                         "career guidance, education/upskilling advice, and form filling actions."
+                    )
+                })
+
+        # Inject Tracked Job Applications & Resumes if available
+        if self.job_tracker:
+            apps_context = self.job_tracker.to_prompt_context()
+            if apps_context:
+                messages.append({
+                    "role": "system",
+                    "content": (
+                        f"Current Verified Tracked Job Applications & Resumes:\n{apps_context}\n\n"
+                        "CRITICAL: When the user asks about applied jobs, application status, history, "
+                        "companies applied to, which resume was used, or follow-up interview prep, "
+                        "use this verified tracking data to give direct, detailed, and accurate responses."
                     )
                 })
 
@@ -220,11 +325,56 @@ class KaaluOrchestrator:
                     if prof:
                         payload["fields"] = prof.get_form_fill_map()
 
-                if recipient not in ("faulkner", "david"):
+                if recipient == "job_tracker":
+                    if not self.job_tracker:
+                        observation = {"success": False, "error": "JobTrackerManager is not available."}
+                    else:
+                        try:
+                            if task_action == "record_application":
+                                rec = self.job_tracker.record_job_application(
+                                    company=payload.get("company", ""),
+                                    position=payload.get("position", ""),
+                                    job_description=payload.get("job_description"),
+                                    job_url=payload.get("job_url"),
+                                    location=payload.get("location"),
+                                    resume_path=payload.get("resume_path"),
+                                    resume_snapshot=payload.get("resume_snapshot"),
+                                    status=payload.get("status", "applied"),
+                                    notes=payload.get("notes"),
+                                    metadata=payload.get("metadata")
+                                )
+                                observation = {"success": True, "application": rec.model_dump()}
+                            elif task_action == "mark_applied":
+                                rec = self.job_tracker.mark_as_applied(
+                                    identifier=payload.get("identifier") or payload.get("application_id") or payload.get("company", ""),
+                                    job_url=payload.get("job_url"),
+                                    notes=payload.get("notes")
+                                )
+                                observation = {"success": bool(rec), "application": rec.model_dump() if rec else None}
+                            elif task_action == "save_resume":
+                                dest_path, dest_fn = self.job_tracker.save_downloaded_resume(
+                                    company=payload.get("company", ""),
+                                    position=payload.get("position", ""),
+                                    source_path=payload.get("source_path"),
+                                    move=payload.get("move", False)
+                                )
+                                observation = {"success": True, "resume_path": str(dest_path), "resume_filename": dest_fn}
+                            elif task_action == "list_applications":
+                                apps = self.job_tracker.list_applications(
+                                    status=payload.get("status"),
+                                    company=payload.get("company")
+                                )
+                                observation = {"success": True, "count": len(apps), "applications": [a.model_dump() for a in apps]}
+                            else:
+                                observation = {"success": False, "error": f"Unknown job_tracker action: '{task_action}'"}
+                        except Exception as jt_err:
+                            observation = {"success": False, "error": str(jt_err)}
+
+                elif recipient not in ("faulkner", "david"):
                     print(f"[Kaalu Error] Unknown agent recipient: '{recipient}'")
                     observation = {
                         "success": False,
-                        "error": f"Unknown recipient agent '{recipient}'. Allowed agents are 'faulkner' and 'david'."
+                        "error": f"Unknown recipient agent '{recipient}'. Allowed agents are 'faulkner', 'david', and 'job_tracker'."
                     }
                 else:
                     print(f"[Kaalu] Delegating task to '{recipient}' -> action: '{task_action}'...")
