@@ -58,7 +58,7 @@ def clean_tts_text(text: str) -> str:
 
 
 class VoiceEngine:
-    def __init__(self, models_dir=None, default_voice="jarvis", use_cuda=False):
+    def __init__(self, models_dir=None, default_voice="jarvis", use_cuda=None):
         if models_dir is None:
             models_dir = Path(__file__).resolve().parent / "models"
         self.models_dir = Path(models_dir)
@@ -68,6 +68,12 @@ class VoiceEngine:
                 self.models_dir = alt_dir
         self.models_dir.mkdir(parents=True, exist_ok=True)
 
+        if use_cuda is None:
+            try:
+                import torch
+                use_cuda = torch.cuda.is_available()
+            except Exception:
+                use_cuda = False
         self.use_cuda = use_cuda
         self.voice = None
         self.voice_name = None
@@ -95,15 +101,40 @@ class VoiceEngine:
         if not config_path.exists():
             raise FileNotFoundError(f"Missing voice configuration: {config_path}")
 
-        self.voice = PiperVoice.load(str(model_path), config_path=str(config_path), use_cuda=self.use_cuda)
+        try:
+            self.voice = PiperVoice.load(str(model_path), config_path=str(config_path), use_cuda=self.use_cuda)
+        except Exception:
+            self.voice = PiperVoice.load(str(model_path), config_path=str(config_path), use_cuda=False)
         with open(config_path, "r", encoding="utf-8") as f:
             self.model_config = json.load(f)
 
         self.voice_name = name
         print(f"Loaded voice: {name}")
 
-    def train_voice(self, name: str, dataset_dir: str = None, checkpoint_path: str = None, language="en-us", sample_rate=22050, epochs=1000, batch_size=4):
-        """Fine-tune and export a custom Piper ONNX voice model from a dataset. Only 'name' is required."""
+    def train_voice(
+        self,
+        name: str,
+        dataset_dir: str = None,
+        checkpoint_path: str = None,
+        language="en-us",
+        sample_rate=22050,
+        epochs=1000,
+        batch_size: int = None,
+        precision: str = None,
+        checkpoint_epochs: int = 25
+    ):
+        """
+        Fine-tune and export a custom Piper ONNX voice model from a dataset.
+        Only 'name' is required (e.g. Speaker.train_voice("tony")).
+        Automatically optimizes batch size, mixed precision (FP16), and checkpoint saving
+        frequency to fully utilize GPU VRAM (e.g. RTX 3050 6GB) and accelerate training.
+        """
+        if batch_size is None:
+            batch_size = 8 if self.use_cuda else 4
+
+        if precision is None:
+            # Ampere/Turing GPUs (e.g. RTX 3050) support 16-mixed Tensor Core acceleration
+            precision = "16-mixed" if self.use_cuda else "32"
         if dataset_dir is None:
             dataset_candidates = [
                 Path(__file__).resolve().parent / "datasets" / name,
@@ -164,20 +195,71 @@ class VoiceEngine:
         model_path = output_dir / f"{name}.onnx"
         config_destination = Path(str(model_path) + ".json")
 
-        subprocess.run([sys.executable, "-m", "piper_train.preprocess", "--language", language, "--input-dir", str(dataset_dir), "--output-dir", str(training_dir), "--dataset-format", "ljspeech", "--single-speaker", "--sample-rate", str(sample_rate)], check=True)
-        subprocess.run([sys.executable, "-m", "piper_train", "--dataset-dir", str(training_dir), "--accelerator", "gpu" if self.use_cuda else "cpu", "--devices", "1", "--batch-size", str(batch_size), "--validation-split", "0.0", "--num-test-examples", "0", "--max_epochs", str(epochs), "--resume_from_checkpoint", str(checkpoint_path), "--checkpoint-epochs", "1", "--precision", "32"], check=True)
-        checkpoints = list(training_dir.glob("lightning_logs/version_*/checkpoints/*.ckpt"))
-        if not checkpoints:
-            raise FileNotFoundError("Traning completed but no checkpoint was found.")
-        latest_checkpoint = max(checkpoints, key=lambda p: p.stat().st_mtime)
-        subprocess.run([sys.executable, "-m", "piper_train.export_onnx", str(latest_checkpoint), str(model_path)], check=True)
+        # Check if previous training checkpoints exist to support resuming
+        existing_ckpts = list(training_dir.glob("lightning_logs/version_*/checkpoints/*.ckpt"))
+        resume_target = checkpoint_path
+
+        if existing_ckpts:
+            latest_existing = max(existing_ckpts, key=lambda p: p.stat().st_mtime)
+            m = re.search(r"epoch=(\d+)", latest_existing.name)
+            ckpt_epochs = (int(m.group(1)) + 1) if m else None
+
+            if ckpt_epochs is not None and ckpt_epochs >= epochs:
+                print(f"Existing checkpoint '{latest_existing.name}' already reached target {epochs} epochs. Exporting ONNX model directly...")
+                self.export_voice(name, checkpoint_path=str(latest_existing))
+                return
+
+            print(f"Resuming training from latest checkpoint: {latest_existing.name}")
+            resume_target = latest_existing
+
+        # Run preprocessing if not already generated
+        if not (training_dir / "dataset.jsonl").exists():
+            subprocess.run([sys.executable, "-m", "piper_train.preprocess", "--language", language, "--input-dir", str(dataset_dir), "--output-dir", str(training_dir), "--dataset-format", "ljspeech", "--single-speaker", "--sample-rate", str(sample_rate)], check=True)
+
+        subprocess.run([
+            sys.executable, "-m", "piper_train",
+            "--dataset-dir", str(training_dir),
+            "--accelerator", "gpu" if self.use_cuda else "cpu",
+            "--devices", "1",
+            "--batch-size", str(batch_size),
+            "--validation-split", "0.0",
+            "--num-test-examples", "0",
+            "--max_epochs", str(epochs),
+            "--resume_from_checkpoint", str(resume_target),
+            "--checkpoint-epochs", str(checkpoint_epochs),
+            "--precision", str(precision)
+        ], check=True)
+
+        self.export_voice(name)
+
+    def export_voice(self, name: str, checkpoint_path: str = None) -> Path:
+        """Export a trained checkpoint to a Piper ONNX model without retraining."""
+        output_dir = self.models_dir / name
+        training_dir = output_dir / "training"
+        model_path = output_dir / f"{name}.onnx"
+        config_destination = Path(str(model_path) + ".json")
+
+        if not checkpoint_path:
+            checkpoints = list(training_dir.glob("lightning_logs/version_*/checkpoints/*.ckpt"))
+            if not checkpoints:
+                raise FileNotFoundError(f"No checkpoint found in {training_dir} to export.")
+            checkpoint_path = max(checkpoints, key=lambda p: p.stat().st_mtime)
+
+        checkpoint_path = Path(checkpoint_path)
+        if not checkpoint_path.exists():
+            raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
+
+        print(f"Exporting checkpoint to ONNX: {checkpoint_path}")
+        subprocess.run([sys.executable, "-m", "piper_train.export_onnx", str(checkpoint_path), str(model_path)], check=True)
+
         config_source = training_dir / "config.json"
         if not config_source.exists():
-            raise FileNotFoundError("Training configuration not found.")
+            raise FileNotFoundError(f"Training configuration not found at {config_source}.")
         shutil.copy2(config_source, config_destination)
 
-        print(f"\nVoice training completed: {name}")
+        print(f"\nVoice export completed: {name}")
         self.set_voice(name)
+        return model_path
 
     def speak(self, text: str, speed=1.0):
         """Generate speech and play it immediately with automated text cleaning."""

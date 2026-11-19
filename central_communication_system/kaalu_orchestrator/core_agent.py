@@ -13,6 +13,18 @@ except (ImportError, ValueError):
             from central_communication_system.voice_system.tts import Speaker
         except (ImportError, ValueError):
             Speaker = None
+
+try:
+    from user_profile.profile_manager import ProfileManager
+except (ImportError, ValueError):
+    try:
+        from ..user_profile.profile_manager import ProfileManager
+    except (ImportError, ValueError):
+        try:
+            from central_communication_system.user_profile.profile_manager import ProfileManager
+        except (ImportError, ValueError):
+            ProfileManager = None
+
 from kaalu_orchestrator.prompts import KAALU_SYSTEM_PROMPT
 from kaalu_orchestrator.ws_client import KaaluWSClient
 from kaalu_orchestrator.rgs_llm_client import RGSLLMClient
@@ -29,13 +41,20 @@ class KaaluOrchestrator:
         ws_uri: str = "ws://localhost:8000/ws/kaalu",
         gateway_url: str = "http://localhost:8000/llm/generate",
         max_steps: int = 15,
-        max_history_turns: int = 10
+        max_history_turns: int = 10,
+        profile_manager: Optional[Any] = None
     ):
         self.llm_client = RGSLLMClient(gateway_url=gateway_url)
         self.ws_client = KaaluWSClient(uri=ws_uri)
         self.max_steps = max_steps
         self.conversation_history: List[Dict[str, str]] = []
         self.max_history_turns = max_history_turns
+        if profile_manager is not None:
+            self.profile_manager = profile_manager
+        elif ProfileManager is not None:
+            self.profile_manager = ProfileManager.get_instance()
+        else:
+            self.profile_manager = None
 
     def reset_session(self):
         """Clear multi-turn session history."""
@@ -95,6 +114,20 @@ class KaaluOrchestrator:
         messages: List[Dict[str, str]] = [
             {"role": "system", "content": KAALU_SYSTEM_PROMPT}
         ]
+
+        # Inject verified User Profile if available
+        if self.profile_manager:
+            user_profile = self.profile_manager.load_profile()
+            if user_profile:
+                profile_context = user_profile.to_prompt_context()
+                messages.append({
+                    "role": "system",
+                    "content": (
+                        f"Current Verified User Information:\n{profile_context}\n\n"
+                        "CRITICAL: Use this profile data to personalize all searches, job filtering, "
+                        "career guidance, education/upskilling advice, and form filling actions."
+                    )
+                })
 
         # Inject previous conversation turns so Kaalu remembers discovered files, folders, and outputs
         for prev_turn in self.conversation_history:
@@ -180,6 +213,12 @@ class KaaluOrchestrator:
                 recipient = decision.get("recipient")
                 task_action = decision.get("task_action")
                 payload = decision.get("payload", {})
+
+                # If delegating fill_form to David without fields specified, autofill from profile
+                if recipient == "david" and task_action == "fill_form" and not payload.get("fields") and self.profile_manager:
+                    prof = self.profile_manager.load_profile()
+                    if prof:
+                        payload["fields"] = prof.get_form_fill_map()
 
                 if recipient not in ("faulkner", "david"):
                     print(f"[Kaalu Error] Unknown agent recipient: '{recipient}'")

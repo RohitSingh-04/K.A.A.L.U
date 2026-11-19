@@ -82,9 +82,15 @@ def train_custom_voice(
     batch_size: int = 4,
     sample_rate: int = 22050,
     language: str = "en-us",
-    use_cuda: bool = False
+    use_cuda: bool = None
 ):
     """Executes the complete Piper voice fine-tuning and export pipeline. Only 'name' is required."""
+    if use_cuda is None:
+        try:
+            import torch
+            use_cuda = torch.cuda.is_available()
+        except Exception:
+            use_cuda = False
     if dataset_dir is None:
         dataset_candidates = [
             Path(__file__).resolve().parent / "datasets" / name,

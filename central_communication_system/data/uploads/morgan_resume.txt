@@ -1,0 +1,5 @@
+Morgan Freeman
+Voice & Audio Engineer
+morgan@audioai.com
+Skills: Python, PyTorch, Librosa, FastSpeech
+Education: MIT B.S. Acoustics

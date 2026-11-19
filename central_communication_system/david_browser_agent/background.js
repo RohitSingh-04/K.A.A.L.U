@@ -44,12 +44,39 @@ function connectRGS() {
             } else if (
                 action === "click" || 
                 action === "type" || 
+                action === "fill_form" || 
                 action === "scrape" || 
                 action === "read_page" || 
                 action === "get_page_elements" || 
                 action === "inspect" || 
                 action === "press_key"
             ) {
+                // If fill_form has no fields provided, fetch from RGS Hub profile endpoint
+                if (action === "fill_form" && (!payload.fields || Object.keys(payload.fields).length === 0)) {
+                    try {
+                        const profResp = await fetch("http://localhost:8000/profile");
+                        if (profResp.ok) {
+                            const profData = await profResp.json();
+                            const b = profData.basic_details || {};
+                            const u = profData.urls || {};
+                            payload.fields = {
+                                "First Name": (b.name || "").split(" ")[0] || "",
+                                "Last Name": (b.name || "").split(" ").slice(1).join(" ") || "",
+                                "Full Name": b.name || "",
+                                "Name": b.name || "",
+                                "Email": b.email || "",
+                                "Phone": b.phone || "",
+                                "Location": b.location || "",
+                                "LinkedIn": u.linkedin || "",
+                                "GitHub": u.github || "",
+                                "Portfolio": u.portfolio || "",
+                                "Website": u.website || ""
+                            };
+                        }
+                    } catch (e) {
+                        console.warn("[David WS] Could not load profile from RGS Hub:", e);
+                    }
+                }
                 resultPayload = await executeContentAction(action, payload);
             } else if (action === "capture_screenshot") {
                 resultPayload = await captureBrowserScreenshot();
@@ -541,6 +568,29 @@ function invokeContentScriptAction(action, payload) {
         return {
             success: true,
             message: `Successfully typed into '${query}' (${el.tagName.toLowerCase()})`
+        };
+    }
+
+    if (action === "fill_form") {
+        const fields = payload.fields || {};
+        const filled = [];
+        const skipped = [];
+        for (const [key, val] of Object.entries(fields)) {
+            if (!val) continue;
+            const el = findElement(key);
+            if (el) {
+                el.scrollIntoView({ behavior: "smooth", block: "center" });
+                typeText(el, String(val), false, true);
+                filled.push(key);
+            } else {
+                skipped.push(key);
+            }
+        }
+        return {
+            success: filled.length > 0,
+            filled_fields: filled,
+            skipped_fields: skipped,
+            message: `Filled ${filled.length} fields: [${filled.join(", ")}]. Skipped: [${skipped.join(", ")}]`
         };
     }
 

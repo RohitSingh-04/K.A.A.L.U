@@ -96,3 +96,40 @@ def test_clean_tts_text_markdown_and_symbols():
     assert "Agreement-Final.pdf" in cleaned
     assert "Complete" in cleaned
     assert "Reference" in cleaned
+
+
+def test_export_voice_and_auto_resume(monkeypatch, tmp_path):
+    """Verify export_voice and automatic resumption when target epochs are already reached."""
+    temp_models = tmp_path / "models"
+    tony_dir = temp_models / "tony"
+    training_dir = tony_dir / "training"
+    ckpt_dir = training_dir / "lightning_logs" / "version_1" / "checkpoints"
+    ckpt_dir.mkdir(parents=True, exist_ok=True)
+
+    dummy_ckpt = ckpt_dir / "epoch=999-step=6000.ckpt"
+    dummy_ckpt.write_text("dummy_weights", encoding="utf-8")
+    (training_dir / "config.json").write_text("{}", encoding="utf-8")
+
+    commands_run = []
+    def mock_run(cmd, *args, **kwargs):
+        commands_run.append(cmd)
+        if "piper_train.export_onnx" in cmd:
+            Path(cmd[-1]).write_bytes(b"dummy_onnx")
+        return None
+
+    monkeypatch.setattr("subprocess.run", mock_run)
+    monkeypatch.setattr(Speaker, "set_voice", lambda name: None)
+    monkeypatch.setattr(Speaker, "models_dir", temp_models)
+
+    # 1. Calling train_voice with epochs=1000 should detect existing epoch 1000 checkpoint and export directly
+    Speaker.train_voice("tony", epochs=1000)
+    assert any("piper_train.export_onnx" in cmd for cmd in commands_run)
+    # piper_train fit command should NOT have been re-run because checkpoint already reached 1000 epochs
+    assert not any("-m" in cmd and cmd[cmd.index("-m") + 1] == "piper_train" for cmd in commands_run)
+
+    # 2. Test export_voice method directly
+    commands_run.clear()
+    exported = Speaker.export_voice("tony")
+    assert exported.name == "tony.onnx"
+    assert any("piper_train.export_onnx" in cmd for cmd in commands_run)
+

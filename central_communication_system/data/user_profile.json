@@ -1,0 +1,694 @@
+{
+  "basic_details": {
+    "name": "Rohit Singh",
+    "email": "rsingh.py@gmail.com",
+    "phone": "+91-7409210904",
+    "location": "Bengaluru, India",
+    "headline": "AI Engineer",
+    "summary": "Software Developer"
+  },
+  "urls": {
+    "linkedin": "https://linkedin.com/in/rohiyaa",
+    "github": "https://github.com/RohitSingh-04",
+    "portfolio": "https://rohiyaa.pythonanywhere.com/about/devinfo/",
+    "website": "https://rohiyaa.pythonanywhere.com/about/devinfo/",
+    "other": []
+  },
+  "skills": {
+    "technical": [
+      "Agentic AI",
+      "LangChain",
+      "Prompt Engineering",
+      "RAG Concepts",
+      "Local LLMs (Ollama",
+      "DeepSeek",
+      "Dolphin3)",
+      "NLP",
+      "AI Workflows",
+      "Python",
+      "SQL",
+      "C/C++",
+      "Java",
+      "JavaScript",
+      "Pandas",
+      "scikit-learn",
+      "PyTorch/TensorFlow (Exposure)",
+      "Automation Scripts",
+      "React",
+      "Rigor",
+      "Adaptability",
+      "Problem Solving"
+    ],
+    "frameworks_and_tools": [
+      "Large-scale Data Processing",
+      "Web Scraping",
+      "APIs (SerpApi",
+      "Playwright)",
+      "ETL Pipelines",
+      "Custom",
+      "AWS EC2",
+      "Docker",
+      "Containerization",
+      "Git/GitHub",
+      "Linux",
+      "FastAPI",
+      "Django",
+      "Django REST Framework",
+      "PostgreSQL",
+      "MongoDB",
+      "MySQL",
+      "SQLite",
+      "API Testing",
+      "Postman",
+      "Web Automation",
+      "Defect Reporting"
+    ],
+    "soft_skills": [
+      "Agile (Scrum/SAFe)",
+      "Project Management",
+      "Risk Management",
+      "Cross-functional Communication",
+      "Analytical"
+    ],
+    "languages": [
+      "English"
+    ],
+    "categories": {}
+  },
+  "experiences": [
+    {
+      "company": "Deloitte",
+      "role": "Associate Analyst",
+      "location": "Bengaluru, India",
+      "start_date": "Sept 2025",
+      "end_date": "July 2026",
+      "current": false,
+      "description": "Engineered Python-based data processing pipelines to preprocess, transform, and analyze large-scale structured datasets, optimizing cross-functional architectures for enterprise compliance.",
+      "highlights": [
+        "Engineered Python-based data processing pipelines to preprocess, transform, and analyze large-scale structured datasets, optimizing cross-functional architectures for enterprise compliance.",
+        "Developed automated backend scripts and custom workflows using Python and Playwright, drastically reducing manual processing efforts for data validation and transaction monitoring.",
+        "Executed deep failure analysis and integrated complex API-driven solutions to improve data evaluation metrics, system latency, and overall execution reliability.",
+        "Collaborated with cross-functional teams to automate heavy AML/KYC transaction monitoring processes, ensuring strict quality standards and risk mitigation.",
+        "Maintained technical documentation for complex data workflows, actively participated in code reviews, and presented analytical findings to technical and non-technical stakeholders."
+      ]
+    },
+    {
+      "company": "Infosys Springboard",
+      "role": "Intern",
+      "location": "Remote",
+      "start_date": "Nov 2024",
+      "end_date": "Jan 2025",
+      "current": false,
+      "description": "Built and deployed scalable Python backend services and REST APIs, bridging client-side requests with underlying database operations to support dynamic application testing.",
+      "highlights": [
+        "Built and deployed scalable Python backend services and REST APIs, bridging client-side requests with underlying database operations to support dynamic application testing.",
+        "Managed the full Software Development Life Cycle (SDLC) from requirement analysis to testing, facilitating seamless data integration between relational databases and responsive client applications.",
+        "Collaborated effectively in an Agile (Scrum) environment to optimize data models, resolve complex technical problems, and ensure continuous optimization of application features.",
+        "Selected to pitch and present the final architecture, working software demo, and business impact directly to key project stakeholders."
+      ]
+    }
+  ],
+  "projects": [
+    {
+      "name": "AML OSDD Helper (Agentic AI Workflow)",
+      "description": "Designed and implemented an agent-based architecture using LangChain and local LLMs to orchestrate autonomous data extraction and risk assessment from public sources.",
+      "technologies": [
+        "Python",
+        "LangChain",
+        "FastAPI",
+        "Ollama"
+      ],
+      "url": "https://github.com/RohitSingh-04/AML_OSDD_Helper",
+      "highlights": [
+        "Designed and implemented an agent-based architecture using LangChain and local LLMs to orchestrate autonomous data extraction and risk assessment from public sources.",
+        "Integrated LLMs with external tools (SerpApi) to enable autonomous decision-making and automated NLP summarization of unstructured web data."
+      ],
+      "stars": 0,
+      "language": null
+    },
+    {
+      "name": "AI Content Creator (Autonomous Pipeline)",
+      "description": "Developed an open-source, multi-step autonomous AI pipeline utilizing Python, Dolphin3, and Kokoro TTS for end-to-end media generation.",
+      "technologies": [
+        "Python",
+        "Prompt Engineering",
+        "LLMs"
+      ],
+      "url": "https://github.com/RohitSingh-04/Content-Creator-AI",
+      "highlights": [
+        "Developed an open-source, multi-step autonomous AI pipeline utilizing Python, Dolphin3, and Kokoro TTS for end-to-end media generation.",
+        "Fine-tuned system prompts and applied robust prompt engineering techniques to ensure reliable text generation and automated task execution."
+      ],
+      "stars": 0,
+      "language": null
+    },
+    {
+      "name": "Musivan (Cloud Deployment)",
+      "description": "Engineered a highly scalable backend architecture utilizing Django and PostgreSQL, demonstrating strong proficiency in distributed systems and cloud deployment.",
+      "technologies": [
+        "Django",
+        "PostgreSQL",
+        "AWS EC2",
+        "Docker"
+      ],
+      "url": "https://musivan-frontend.vercel.app",
+      "highlights": [
+        "Engineered a highly scalable backend architecture utilizing Django and PostgreSQL, demonstrating strong proficiency in distributed systems and cloud deployment.",
+        "Containerized intelligent application components using Docker and successfully orchestrated deployment on AWS EC2 public cloud infrastructure."
+      ],
+      "stars": 0,
+      "language": null
+    },
+    {
+      "name": "PreAnalysis-Automation",
+      "description": "Architected a standalone Python automation solution to parse structured spreadsheets and automate complex preprocessing workflows, significantly helping analysts clean data before final review.",
+      "technologies": [
+        "Python",
+        "Pandas"
+      ],
+      "url": null,
+      "highlights": [
+        "Architected a standalone Python automation solution to parse structured spreadsheets and automate complex preprocessing workflows, significantly helping analysts clean data before final review."
+      ],
+      "stars": 0,
+      "language": null
+    },
+    {
+      "name": "risk-trace",
+      "description": "Deterministic synthetic insurance lifecycle generator and underwriting benchmark with controlled anomaly injection, ground-truth labeling, and automated validation.",
+      "technologies": [
+        "Python"
+      ],
+      "url": "https://github.com/RohitSingh-04/risk-trace",
+      "highlights": [
+        "Deterministic synthetic insurance lifecycle generator and underwriting benchmark with controlled anomaly injection, ground-truth labeling, and automated validation."
+      ],
+      "stars": 0,
+      "language": null
+    },
+    {
+      "name": "Reverse-Engineer-Vibe-Coding",
+      "description": "A collection of reverse-engineered applications rebuild and analyzed using Google Antigravity - Gemini Flash 3.8",
+      "technologies": [
+        "C#"
+      ],
+      "url": "https://github.com/RohitSingh-04/Reverse-Engineer-Vibe-Coding",
+      "highlights": [
+        "A collection of reverse-engineered applications rebuild and analyzed using Google Antigravity - Gemini Flash 3.8"
+      ],
+      "stars": 0,
+      "language": null
+    },
+    {
+      "name": "AML_OSDD_Helper",
+      "description": "a tool build to make the OSDD faster for AML usecases",
+      "technologies": [
+        "JavaScript"
+      ],
+      "url": "https://github.com/RohitSingh-04/AML_OSDD_Helper",
+      "highlights": [
+        "a tool build to make the OSDD faster for AML usecases"
+      ],
+      "stars": 0,
+      "language": null
+    },
+    {
+      "name": "job-autofill-extension",
+      "description": "AI-powered Chrome extension that autofills job applications (Greenhouse, Lever), generates tailored answers + cover letters, and flags visa-sponsorship/eligibility requirements.",
+      "technologies": [],
+      "url": "https://github.com/RohitSingh-04/job-autofill-extension",
+      "highlights": [
+        "AI-powered Chrome extension that autofills job applications (Greenhouse, Lever), generates tailored answers + cover letters, and flags visa-sponsorship/eligibility requirements."
+      ],
+      "stars": 0,
+      "language": null
+    },
+    {
+      "name": "Spoofer",
+      "description": "A stealthy screen capture tool featuring a scroll-triggered Python client and a FastAPI backend for dynamic image storage and retrieval.",
+      "technologies": [
+        "Python"
+      ],
+      "url": "https://github.com/RohitSingh-04/Spoofer",
+      "highlights": [
+        "A stealthy screen capture tool featuring a scroll-triggered Python client and a FastAPI backend for dynamic image storage and retrieval."
+      ],
+      "stars": 0,
+      "language": null
+    },
+    {
+      "name": "Content-Creator-AI",
+      "description": "",
+      "technologies": [
+        "Python"
+      ],
+      "url": "https://github.com/RohitSingh-04/Content-Creator-AI",
+      "highlights": [],
+      "stars": 0,
+      "language": null
+    },
+    {
+      "name": "django-crm",
+      "description": "CRM and Task management software, Email marketing and many more. Django CRM software app is built for individual use by businesses of any size or freelancers and is designed to provide easy customization and quick development. ✨",
+      "technologies": [],
+      "url": "https://github.com/RohitSingh-04/django-crm",
+      "highlights": [
+        "CRM and Task management software, Email marketing and many more. Django CRM software app is built for individual use by businesses of any size or freelancers and is designed to provide easy customization and quick development. ✨"
+      ],
+      "stars": 0,
+      "language": null
+    },
+    {
+      "name": "RohitSingh-04",
+      "description": "Config files for my GitHub profile.",
+      "technologies": [
+        "config",
+        "github-config"
+      ],
+      "url": "https://github.com/RohitSingh-04/RohitSingh-04",
+      "highlights": [
+        "Config files for my GitHub profile."
+      ],
+      "stars": 0,
+      "language": null
+    },
+    {
+      "name": "Jobs_Applier_AI_Agent_AIHawk",
+      "description": "Open source AI job application bot in Python: auto apply to jobs, with a tailored resume and cover letter for each posting.",
+      "technologies": [],
+      "url": "https://github.com/RohitSingh-04/Jobs_Applier_AI_Agent_AIHawk",
+      "highlights": [
+        "Open source AI job application bot in Python: auto apply to jobs, with a tailored resume and cover letter for each posting."
+      ],
+      "stars": 0,
+      "language": null
+    },
+    {
+      "name": "Musivan-Frontend",
+      "description": "Music Streaming Application",
+      "technologies": [
+        "JavaScript"
+      ],
+      "url": "https://github.com/RohitSingh-04/Musivan-Frontend",
+      "highlights": [
+        "Music Streaming Application"
+      ],
+      "stars": 0,
+      "language": null
+    },
+    {
+      "name": "CollabNotes",
+      "description": "End-to-End Encryption version",
+      "technologies": [
+        "JavaScript"
+      ],
+      "url": "https://github.com/RohitSingh-04/CollabNotes",
+      "highlights": [
+        "End-to-End Encryption version"
+      ],
+      "stars": 0,
+      "language": null
+    },
+    {
+      "name": "PreAnalysis-Automation",
+      "description": "",
+      "technologies": [
+        "Python"
+      ],
+      "url": "https://github.com/RohitSingh-04/PreAnalysis-Automation",
+      "highlights": [],
+      "stars": 0,
+      "language": null
+    },
+    {
+      "name": "Python-Solutions",
+      "description": "LeetCode Solutions from 27-Dec",
+      "technologies": [
+        "Python"
+      ],
+      "url": "https://github.com/RohitSingh-04/Python-Solutions",
+      "highlights": [
+        "LeetCode Solutions from 27-Dec"
+      ],
+      "stars": 0,
+      "language": null
+    },
+    {
+      "name": "Blog",
+      "description": "blogs using django",
+      "technologies": [
+        "Python"
+      ],
+      "url": "https://github.com/RohitSingh-04/Blog",
+      "highlights": [
+        "blogs using django"
+      ],
+      "stars": 0,
+      "language": null
+    },
+    {
+      "name": "Spam-Detector",
+      "description": "This is project is a project showing the deployment process of a Machine Learning Model using Flask",
+      "technologies": [
+        "CSS"
+      ],
+      "url": "https://github.com/RohitSingh-04/Spam-Detector",
+      "highlights": [
+        "This is project is a project showing the deployment process of a Machine Learning Model using Flask"
+      ],
+      "stars": 0,
+      "language": null
+    },
+    {
+      "name": "GEU-LMS-Automation",
+      "description": "a Chrome Extension which helps to play videos without interruptions and carry on making notes.",
+      "technologies": [
+        "JavaScript",
+        "automation",
+        "chrome-extension",
+        "javascript"
+      ],
+      "url": "https://github.com/RohitSingh-04/GEU-LMS-Automation",
+      "highlights": [
+        "a Chrome Extension which helps to play videos without interruptions and carry on making notes."
+      ],
+      "stars": 0,
+      "language": null
+    },
+    {
+      "name": "RoadMap-Tracker",
+      "description": "",
+      "technologies": [
+        "Python"
+      ],
+      "url": "https://github.com/RohitSingh-04/RoadMap-Tracker",
+      "highlights": [],
+      "stars": 0,
+      "language": null
+    },
+    {
+      "name": "FindMyClass",
+      "description": "",
+      "technologies": [
+        "JavaScript"
+      ],
+      "url": "https://github.com/RohitSingh-04/FindMyClass",
+      "highlights": [],
+      "stars": 0,
+      "language": null
+    },
+    {
+      "name": "E-Commerce",
+      "description": "using MERN stack along with fastapi to render the insights",
+      "technologies": [
+        "JavaScript"
+      ],
+      "url": "https://github.com/RohitSingh-04/E-Commerce",
+      "highlights": [
+        "using MERN stack along with fastapi to render the insights"
+      ],
+      "stars": 0,
+      "language": null
+    },
+    {
+      "name": "PortfolioBuilder",
+      "description": "",
+      "technologies": [
+        "HTML"
+      ],
+      "url": "https://github.com/RohitSingh-04/PortfolioBuilder",
+      "highlights": [],
+      "stars": 0,
+      "language": null
+    },
+    {
+      "name": "Matrices-Datatype-in-python",
+      "description": "this is a matrix datatype for python",
+      "technologies": [
+        "Python"
+      ],
+      "url": "https://github.com/RohitSingh-04/Matrices-Datatype-in-python",
+      "highlights": [
+        "this is a matrix datatype for python"
+      ],
+      "stars": 0,
+      "language": null
+    },
+    {
+      "name": "FUNPLAYER-DISTRIBUTION",
+      "description": "This Repo consist of exe of funplayer",
+      "technologies": [
+        "Tcl"
+      ],
+      "url": "https://github.com/RohitSingh-04/FUNPLAYER-DISTRIBUTION",
+      "highlights": [
+        "This Repo consist of exe of funplayer"
+      ],
+      "stars": 0,
+      "language": null
+    },
+    {
+      "name": "image-downloader",
+      "description": "",
+      "technologies": [
+        "Python"
+      ],
+      "url": "https://github.com/RohitSingh-04/image-downloader",
+      "highlights": [],
+      "stars": 0,
+      "language": null
+    },
+    {
+      "name": "Nvidia-Stock-Prediction-using-Regression",
+      "description": "Stock Prediction using Linear Regression",
+      "technologies": [
+        "Jupyter Notebook"
+      ],
+      "url": "https://github.com/RohitSingh-04/Nvidia-Stock-Prediction-using-Regression",
+      "highlights": [
+        "Stock Prediction using Linear Regression"
+      ],
+      "stars": 0,
+      "language": null
+    },
+    {
+      "name": "NoteShare",
+      "description": "",
+      "technologies": [
+        "Python"
+      ],
+      "url": "https://github.com/RohitSingh-04/NoteShare",
+      "highlights": [],
+      "stars": 0,
+      "language": null
+    },
+    {
+      "name": "task_assinger",
+      "description": "This repository provides a Django REST Framework (DRF) based Task Management API that allows users to create tasks, assign them to users, and fetch tasks assigned to specific users.",
+      "technologies": [
+        "Python"
+      ],
+      "url": "https://github.com/RohitSingh-04/task_assinger",
+      "highlights": [
+        "This repository provides a Django REST Framework (DRF) based Task Management API that allows users to create tasks, assign them to users, and fetch tasks assigned to specific users."
+      ],
+      "stars": 0,
+      "language": null
+    },
+    {
+      "name": "InfoSys-SpringBoard-Fashion-Ecommerce-Project",
+      "description": "This is a fashion E Commerce website made by intern of infosys springboard",
+      "technologies": [
+        "Python"
+      ],
+      "url": "https://github.com/RohitSingh-04/InfoSys-SpringBoard-Fashion-Ecommerce-Project",
+      "highlights": [
+        "This is a fashion E Commerce website made by intern of infosys springboard"
+      ],
+      "stars": 0,
+      "language": null
+    },
+    {
+      "name": "f-ecom-team1",
+      "description": "",
+      "technologies": [
+        "Python"
+      ],
+      "url": "https://github.com/RohitSingh-04/f-ecom-team1",
+      "highlights": [],
+      "stars": 0,
+      "language": null
+    },
+    {
+      "name": "contact_no_filter",
+      "description": "filter specific contact messages in a whatsapp group",
+      "technologies": [
+        "Python"
+      ],
+      "url": "https://github.com/RohitSingh-04/contact_no_filter",
+      "highlights": [
+        "filter specific contact messages in a whatsapp group"
+      ],
+      "stars": 0,
+      "language": null
+    },
+    {
+      "name": "Raasta-Data-Extractor",
+      "description": "",
+      "technologies": [
+        "Python"
+      ],
+      "url": "https://github.com/RohitSingh-04/Raasta-Data-Extractor",
+      "highlights": [],
+      "stars": 0,
+      "language": null
+    },
+    {
+      "name": "laundry-management-system",
+      "description": "",
+      "technologies": [
+        "Python"
+      ],
+      "url": "https://github.com/RohitSingh-04/laundry-management-system",
+      "highlights": [],
+      "stars": 0,
+      "language": null
+    },
+    {
+      "name": "track_us",
+      "description": "",
+      "technologies": [
+        "C++"
+      ],
+      "url": "https://github.com/RohitSingh-04/track_us",
+      "highlights": [],
+      "stars": 0,
+      "language": null
+    },
+    {
+      "name": "JioSaavnAPI",
+      "description": "An unofficial API for JioSaavn written in Python 3",
+      "technologies": [],
+      "url": "https://github.com/RohitSingh-04/JioSaavnAPI",
+      "highlights": [
+        "An unofficial API for JioSaavn written in Python 3"
+      ],
+      "stars": 0,
+      "language": null
+    },
+    {
+      "name": "Grocery_Management",
+      "description": "",
+      "technologies": [
+        "Python"
+      ],
+      "url": "https://github.com/RohitSingh-04/Grocery_Management",
+      "highlights": [],
+      "stars": 0,
+      "language": null
+    },
+    {
+      "name": "web_starter",
+      "description": "",
+      "technologies": [],
+      "url": "https://github.com/RohitSingh-04/web_starter",
+      "highlights": [],
+      "stars": 0,
+      "language": null
+    }
+  ],
+  "educations": [
+    {
+      "degree": "Master of Computer Applications (MCA)",
+      "institution": "Graphic Era University",
+      "field_of_study": null,
+      "start_year": "2025",
+      "end_year": "2027",
+      "grade": "Ongoing"
+    },
+    {
+      "degree": "Bachelor of Computer Applications (BCA)",
+      "institution": "Graphic Era Hill University",
+      "field_of_study": null,
+      "start_year": "2022",
+      "end_year": "2025",
+      "grade": "CGPA: 8.9/10"
+    }
+  ],
+  "certifications": [
+    {
+      "name": "Django - The Complete Course 2026 (Beginner + Advanced + AI)",
+      "issuer": "Udemy",
+      "issue_date": "2026",
+      "url": null
+    },
+    {
+      "name": "FATF Recommendations on High Risk Customers and Activities",
+      "issuer": "Udemy",
+      "issue_date": "2025",
+      "url": null
+    },
+    {
+      "name": "Anti-Money Laundering Concepts: AML, KYC and Compliance",
+      "issuer": "Udemy",
+      "issue_date": "2025",
+      "url": null
+    },
+    {
+      "name": "The Complete Guide To Anti Money Laundering (AML) Compliance",
+      "issuer": "Udemy",
+      "issue_date": "2025",
+      "url": null
+    },
+    {
+      "name": "AML Case Investigation Skills",
+      "issuer": "Udemy",
+      "issue_date": "2025",
+      "url": null
+    },
+    {
+      "name": "Anti-Money Laundering and Combating Financing Terrorism",
+      "issuer": "Udemy",
+      "issue_date": "2025",
+      "url": null
+    },
+    {
+      "name": "Fraud Risk Analytics (Excel & AI based tools) and Prevention",
+      "issuer": "Udemy",
+      "issue_date": "2025",
+      "url": null
+    },
+    {
+      "name": "Excel Data Analytics in AML Financial Intelligence Analysis",
+      "issuer": "Udemy",
+      "issue_date": "2025",
+      "url": null
+    },
+    {
+      "name": "Project Management",
+      "issuer": "IIT Roorkee, NPTEL",
+      "issue_date": "2024",
+      "url": null
+    },
+    {
+      "name": "Machine Learning with Python: Build Real-World ML Models",
+      "issuer": "IBM, Coursera",
+      "issue_date": "2023",
+      "url": null
+    },
+    {
+      "name": "Using Python to Interact with the Operating System",
+      "issuer": "Google, Coursera",
+      "issue_date": "2023",
+      "url": null
+    },
+    {
+      "name": "Crash Course on Python",
+      "issuer": "Google, Coursera",
+      "issue_date": "2023",
+      "url": null
+    }
+  ],
+  "resume_path": "C:\\Users\\rsing\\OneDrive\\Desktop\\Project-Kaalu-V2\\central_communication_system\\data\\uploads\\RohitSinghResume.pdf",
+  "last_updated": "2026-11-19T08:09:46.197042"
+}
