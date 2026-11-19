@@ -239,3 +239,47 @@ async def test_kaalu_dual_voice_and_text_response():
     assert result["status"] == "completed"
     assert "file1.pdf" in result["final_answer"]
     assert result["voice_response"] == "I found three files on your Desktop."
+
+
+def test_kaalu_identity_and_creator_prompt_definitions():
+    """Verify that Kaalu system prompt includes creator Rohit, purpose, and active model."""
+    from kaalu_orchestrator.prompts import get_kaalu_system_prompt
+
+    prompt = get_kaalu_system_prompt("gemini-2.5-pro")
+    assert "KAALU" in prompt
+    assert "Master named Rohit" in prompt
+    assert "System AI Automation for Fun" in prompt
+    assert "gemini-2.5-pro" in prompt
+
+
+@pytest.mark.asyncio
+async def test_kaalu_identity_inquiry_goal():
+    """Verify Kaalu responds to 'who are you?' acknowledging creator Rohit and active cloud model."""
+    orchestrator = KaaluOrchestrator(max_steps=2)
+    orchestrator.ws_client.connect_server = AsyncMock(return_value=True)
+
+    captured_messages = []
+
+    async def mock_generate(messages):
+        captured_messages.extend(messages)
+        return json.dumps({
+            "thought": "The user is asking about my identity. I will explain that I am KAALU, created by Master Rohit for System AI Automation for Fun, currently powered by gemini-3.1-flash-lite.",
+            "action": "finish",
+            "final_answer": "I am KAALU, an autonomous system orchestrator created by my Master Rohit for System AI Automation for Fun! I am currently powered by the gemini-3.1-flash-lite cloud model to be smart, plan, and execute tasks across your desktop, browser, and phone.",
+            "voice_response": "I am Kaalu, created by Rohit for System AI Automation for Fun, currently powered by the Gemini cloud model."
+        })
+
+    orchestrator.llm_client.generate_async = mock_generate
+
+    result = await orchestrator.process_user_goal("who are you and who created you?")
+    assert result["status"] == "completed"
+    assert "KAALU" in result["final_answer"]
+    assert "Rohit" in result["final_answer"]
+    assert "gemini-3.1-flash-lite" in result["final_answer"]
+
+    # Verify system prompt given to LLM contained the creator and active model
+    sys_content = captured_messages[0]["content"]
+    assert "Rohit" in sys_content
+    assert "System AI Automation for Fun" in sys_content
+    assert "gemini-3.1-flash-lite" in sys_content
+

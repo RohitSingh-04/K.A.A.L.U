@@ -596,3 +596,347 @@ class AndroidDeviceManager:
             "stderr": res.stderr,
             "exit_code": res.returncode
         }
+
+    def type_gboard_emoji(
+        self,
+        emoji: str = "laugh",
+        target: Optional[str] = None,
+        serial: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Universally types an emoji using Gboard across any Android application.
+        Uses Gboard's emoji search for 100% deterministic, reliable results independent of recent emojis:
+        1. Focuses input field so Gboard is visible.
+        2. Long-presses the comma/emoji ',' key at [205, 2320] on Gboard (450ms) to open the emoji palette.
+        3. Taps the 'Search' pill on Gboard at [280, 1280].
+        4. Types the search keyword (e.g. 'laugh', 'smile', 'heart', 'rofl') into Gboard emoji search.
+        5. Selects the target emoji from the deterministic search results grid (e.g. 😂 at [229, 1213]).
+        6. Closes the search palette / switches back to text mode cleanly.
+        """
+        target_serial = self._default_serial(serial)
+        if not target_serial:
+            return {"success": False, "error": "No Android device connected."}
+
+        # 1. Ensure input field is focused so Gboard is visible
+        if target:
+            self.tap(target=target, serial=target_serial)
+            time.sleep(0.4)
+        else:
+            entry = (
+                self.find_element("entry", serial=target_serial)
+                or self.find_element("Message", serial=target_serial)
+                or self.find_element("Type a message", serial=target_serial)
+            )
+            if entry:
+                self._run_adb(["-s", target_serial, "shell", "input", "tap", str(entry["center"][0]), str(entry["center"][1])])
+                time.sleep(0.4)
+
+        # 2. Long press on ',' (comma/emoji) key on Gboard at [205, 2320] (450ms)
+        self._run_adb(["-s", target_serial, "shell", "input", "swipe", "205", "2320", "205", "2320", "450"])
+        time.sleep(0.5)
+
+        # 3. Tap the 'Q Search' pill on Gboard emoji palette at [280, 1280]
+        self._run_adb(["-s", target_serial, "shell", "input", "tap", "280", "1280"])
+        time.sleep(0.5)
+
+        # 4. Resolve keyword for Gboard emoji search
+        emoji_clean = emoji.strip().lower()
+        search_keyword_map = {
+            "😂": "laugh",
+            "laugh": "laugh",
+            "laughing": "laugh",
+            "joy": "laugh",
+            "🤣": "rofl",
+            "rofl": "rofl",
+            "rolling": "rofl",
+            "🙂": "smile",
+            "😀": "smile",
+            "smile": "smile",
+            "happy": "smile",
+            "grin": "smile",
+            "❤️": "heart",
+            "heart": "heart",
+            "love": "heart",
+            "👍": "thumbs up",
+            "thumbs_up": "thumbs up",
+            "thumbsup": "thumbs up",
+            "👏": "clap",
+            "clap": "clap",
+            "🔥": "fire",
+            "fire": "fire",
+            "lit": "fire"
+        }
+        search_term = search_keyword_map.get(emoji_clean, emoji_clean)
+        safe_term = search_term.replace(" ", "%s")
+        self._run_adb(["-s", target_serial, "shell", "input", "text", safe_term])
+        time.sleep(0.6)
+
+        # 5. Tap the target emoji in Gboard's deterministic search results grid
+        # In Gboard search results: Row 1 is at y=1213.
+        # For 'laugh': Col 1 [229, 1213] is '😂' (Face with tears of joy), Col 0 [89, 1213] is '🤣' (ROFL).
+        # For other single-match queries (smile, heart, thumbs up, fire), Col 0 [89, 1213] is the primary match.
+        search_grid_coords = {
+            "laugh": (229, 1213),
+            "laughing": (229, 1213),
+            "joy": (229, 1213),
+            "😂": (229, 1213),
+            "rofl": (89, 1213),
+            "🤣": (89, 1213),
+            "smile": (89, 1213),
+            "happy": (89, 1213),
+            "🙂": (89, 1213),
+            "😀": (89, 1213),
+            "grin": (89, 1213),
+            "heart": (89, 1213),
+            "love": (89, 1213),
+            "❤️": (89, 1213),
+            "thumbs_up": (89, 1213),
+            "thumbsup": (89, 1213),
+            "👍": (89, 1213),
+            "clap": (89, 1213),
+            "👏": (89, 1213),
+            "fire": (89, 1213),
+            "🔥": (89, 1213),
+        }
+        tap_coord = search_grid_coords.get(emoji_clean, (89, 1213))
+        self._run_adb(["-s", target_serial, "shell", "input", "tap", str(tap_coord[0]), str(tap_coord[1])])
+        time.sleep(0.4)
+
+        # 6. Tap back arrow on Gboard search [72, 1045] to close search palette and restore keyboard
+        self._run_adb(["-s", target_serial, "shell", "input", "tap", "72", "1045"])
+        time.sleep(0.3)
+
+        return {
+            "success": True,
+            "action": "type_gboard_emoji",
+            "emoji": emoji,
+            "search_term": search_term,
+            "coordinate": tap_coord,
+            "method": "gboard_emoji_search"
+        }
+
+    def tap_emoji(self, emoji: str = "laugh", serial: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Universal emoji typing method via Gboard keyboard.
+        Uses Gboard's long-press on ',' to open emoji options across all Android apps.
+        """
+        return self.type_gboard_emoji(emoji=emoji, serial=serial)
+
+    def get_auto_rotate_status(self, serial: Optional[str] = None) -> Dict[str, Any]:
+        """Queries current screen auto-rotation and orientation lock status."""
+        target_serial = self._default_serial(serial)
+        if not target_serial:
+            return {"success": False, "error": "No Android device connected."}
+        accel = self._run_adb(["-s", target_serial, "shell", "settings", "get", "system", "accelerometer_rotation"]).stdout.strip()
+        user_rot = self._run_adb(["-s", target_serial, "shell", "settings", "get", "system", "user_rotation"]).stdout.strip()
+        return {
+            "success": True,
+            "auto_rotate": accel == "1",
+            "accelerometer_rotation": accel,
+            "user_rotation": user_rot,
+            "is_portrait_locked": accel == "0" and user_rot == "0"
+        }
+
+    def set_auto_rotate(self, enabled: bool = False, serial: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Locks screen orientation or enables auto-rotate.
+        enabled=False locks device in portrait mode and disables auto-rotate.
+        """
+        target_serial = self._default_serial(serial)
+        if not target_serial:
+            return {"success": False, "error": "No Android device connected."}
+        val = "1" if enabled else "0"
+        self._run_adb(["-s", target_serial, "shell", "settings", "put", "system", "accelerometer_rotation", val])
+        if not enabled:
+            self._run_adb(["-s", target_serial, "shell", "settings", "put", "system", "user_rotation", "0"])
+        status = self.get_auto_rotate_status(serial=target_serial)
+        return {
+            "success": True,
+            "action": "set_auto_rotate",
+            "enabled": enabled,
+            "status": status
+        }
+
+    def call_phone(self, target: str, app: str = "phone", serial: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Places a phone call or WhatsApp voice call to a phone number or contact name.
+        Uses native high-speed intents to complete in a single action without rate limits.
+        """
+        target_serial = self._default_serial(serial)
+        if not target_serial:
+            return {"success": False, "error": "No Android device connected."}
+
+        clean_digits = re.sub(r"[^\d+]", "", target)
+
+        if app.lower() == "whatsapp":
+            # WhatsApp Voice Call
+            self.open_app("com.whatsapp", serial=target_serial)
+            time.sleep(0.6)
+            h = self.dump_ui_hierarchy(target_serial)
+
+            # If not in conversation, open chat
+            if "Conversation" not in (h.get("current_activity") or ""):
+                contact_elem = self.find_element(target, serial=target_serial)
+                if contact_elem and contact_elem["center"][1] > 400:
+                    self._run_adb(["-s", target_serial, "shell", "input", "tap", str(contact_elem["center"][0]), str(contact_elem["center"][1])])
+                else:
+                    self._run_adb(["-s", target_serial, "shell", "input", "tap", "540", "359"])
+                    time.sleep(0.3)
+                    self.type_text(target, serial=target_serial)
+                    time.sleep(0.6)
+                    found = self.find_element(target, serial=target_serial)
+                    if found:
+                        self._run_adb(["-s", target_serial, "shell", "input", "tap", str(found["center"][0]), str(found["center"][1])])
+                    else:
+                        self._run_adb(["-s", target_serial, "shell", "input", "tap", "387", "868"])
+                time.sleep(0.8)
+
+            # Tap Voice call button in chat header
+            call_btn = self.find_element("Voice call", serial=target_serial)
+            if call_btn:
+                self._run_adb(["-s", target_serial, "shell", "input", "tap", str(call_btn["center"][0]), str(call_btn["center"][1])])
+            else:
+                self._run_adb(["-s", target_serial, "shell", "input", "tap", "888", "191"])
+            time.sleep(0.5)
+
+            confirm = self.find_element("Call", serial=target_serial)
+            if confirm:
+                self._run_adb(["-s", target_serial, "shell", "input", "tap", str(confirm["center"][0]), str(confirm["center"][1])])
+
+            return {
+                "success": True,
+                "action": "call_phone",
+                "type": "whatsapp_voice_call",
+                "contact": target,
+                "app": "whatsapp"
+            }
+
+        else:
+            # Cellular Phone Call
+            if clean_digits and len(clean_digits) >= 3:
+                res = self._run_adb(["-s", target_serial, "shell", "am", "start", "-a", "android.intent.action.CALL", "-d", f"tel:{clean_digits}"])
+                if res.returncode != 0:
+                    self._run_adb(["-s", target_serial, "shell", "am", "start", "-a", "android.intent.action.DIAL", "-d", f"tel:{clean_digits}"])
+                return {
+                    "success": True,
+                    "action": "call_phone",
+                    "type": "cellular",
+                    "phone_number": clean_digits,
+                    "target": target
+                }
+            else:
+                self._run_adb(["-s", target_serial, "shell", "am", "start", "-a", "android.intent.action.VIEW", "content://contacts/people"])
+                time.sleep(0.5)
+                self.type_text(target, serial=target_serial)
+                return {
+                    "success": True,
+                    "action": "call_phone",
+                    "type": "contacts_search",
+                    "target": target
+                }
+
+    def send_whatsapp(
+        self,
+        contact: str,
+        message: str = "",
+        emoji: Optional[str] = None,
+        auto_send: bool = True,
+        serial: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        High-level, ultra-efficient workflow for sending WhatsApp messages & emojis.
+        Executes end-to-end in a single turn without consuming reasoning loops or token limits.
+        If auto_send is False, prepares the chat and types the message/emoji without tapping Send.
+        """
+        target_serial = self._default_serial(serial)
+        if not target_serial:
+            return {"success": False, "error": "No Android device connected."}
+
+        # 1. Bring WhatsApp to front
+        self.open_app("com.whatsapp", serial=target_serial)
+        time.sleep(0.6)
+
+        h = self.dump_ui_hierarchy(target_serial)
+        activity = h.get("current_activity") or ""
+
+        # If currently in ContactInfo, press back
+        if "ContactInfoActivity" in activity:
+            self.press_key("BACK", serial=target_serial)
+            time.sleep(0.4)
+            h = self.dump_ui_hierarchy(target_serial)
+            activity = h.get("current_activity") or ""
+
+        # 2. Check if already in Conversation with this contact
+        in_correct_chat = "Conversation" in activity and (self.find_element(contact, serial=target_serial) is not None)
+
+        if not in_correct_chat:
+            if "Conversation" in activity:
+                self.press_key("BACK", serial=target_serial)
+                time.sleep(0.4)
+                h = self.dump_ui_hierarchy(target_serial)
+
+            contact_elem = self.find_element(contact, serial=target_serial)
+            if contact_elem and contact_elem["center"][1] > 400:
+                self._run_adb(["-s", target_serial, "shell", "input", "tap", str(contact_elem["center"][0]), str(contact_elem["center"][1])])
+            else:
+                search_elem = self.find_element("Ask Meta AI or Search", serial=target_serial) or self.find_element("Search", serial=target_serial)
+                if search_elem:
+                    self._run_adb(["-s", target_serial, "shell", "input", "tap", str(search_elem["center"][0]), str(search_elem["center"][1])])
+                else:
+                    self._run_adb(["-s", target_serial, "shell", "input", "tap", "540", "359"])
+                time.sleep(0.3)
+                self.type_text(contact, serial=target_serial)
+                time.sleep(0.7)
+
+                res_elem = self.find_element(contact, serial=target_serial)
+                if res_elem:
+                    self._run_adb(["-s", target_serial, "shell", "input", "tap", str(res_elem["center"][0]), str(res_elem["center"][1])])
+                else:
+                    self._run_adb(["-s", target_serial, "shell", "input", "tap", "387", "868"])
+            time.sleep(0.8)
+
+        # 3. Locate text input field and ensure it is focused (opens Gboard)
+        entry_elem = (
+            self.find_element("entry", serial=target_serial)
+            or self.find_element("Message", serial=target_serial)
+            or self.find_element("Type a message", serial=target_serial)
+        )
+        input_y = entry_elem["center"][1] if entry_elem else 1502
+        if entry_elem:
+            self._run_adb(["-s", target_serial, "shell", "input", "tap", str(entry_elem["center"][0]), str(entry_elem["center"][1])])
+            time.sleep(0.3)
+
+        # 4. Type text message if provided
+        if message:
+            self.type_text(text=message, serial=target_serial)
+            time.sleep(0.3)
+
+        # 5. Type emoji via Gboard if requested (universal across apps)
+        if emoji:
+            self.type_gboard_emoji(emoji=emoji, serial=target_serial)
+            time.sleep(0.4)
+
+        # 6. Locate Send button with explicit guard against Voice Note Recording
+        sent = False
+        if auto_send:
+            h = self.dump_ui_hierarchy(target_serial)
+            send_btn = self.find_element("Send", serial=target_serial)
+            if send_btn:
+                self._run_adb(["-s", target_serial, "shell", "input", "tap", str(send_btn["center"][0]), str(send_btn["center"][1])])
+                sent = True
+            else:
+                # ABSOLUTE SAFEGUARD: If Send button is not confirmed on screen, DO NOT TAP!
+                # In WhatsApp, tapping (980, y) when Send is absent triggers the microphone/voice recording.
+                print("[Android Safeguard] Send button is not visible on screen. Skipping tap to completely prevent activating voice recording.")
+                sent = False
+            time.sleep(0.4)
+
+        return {
+            "success": True,
+            "action": "send_whatsapp",
+            "contact": contact,
+            "message": message,
+            "emoji": emoji,
+            "auto_send": auto_send,
+            "verified": sent
+        }

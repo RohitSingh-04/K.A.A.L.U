@@ -413,6 +413,49 @@ async def post_android_shell(payload: Dict[str, Any]):
     res = mgr.shell(command=cmd, serial=payload.get("serial"))
     return res
 
+@app.post("/android/whatsapp/send")
+async def post_android_send_whatsapp(payload: Dict[str, Any]):
+    """High-efficiency macro: opens WhatsApp, navigates to contact, types text/emoji, and sends."""
+    contact = payload.get("contact")
+    if not contact:
+        raise HTTPException(status_code=400, detail="Missing required field 'contact'.")
+    if not AndroidDeviceManager:
+        raise HTTPException(status_code=503, detail="Android controller module not loaded.")
+    mgr = AndroidDeviceManager.get_instance()
+    res = mgr.send_whatsapp(
+        contact=str(contact),
+        message=payload.get("message", ""),
+        emoji=payload.get("emoji"),
+        serial=payload.get("serial")
+    )
+    return res
+
+@app.post("/android/call")
+async def post_android_call(payload: Dict[str, Any]):
+    """High-efficiency macro: places a direct cellular or WhatsApp voice call to a number or contact."""
+    target = payload.get("target") or payload.get("number") or payload.get("contact")
+    if not target:
+        raise HTTPException(status_code=400, detail="Missing required field 'target'.")
+    if not AndroidDeviceManager:
+        raise HTTPException(status_code=503, detail="Android controller module not loaded.")
+    mgr = AndroidDeviceManager.get_instance()
+    res = mgr.call_phone(
+        target=str(target),
+        app=payload.get("app", "phone"),
+        serial=payload.get("serial")
+    )
+    return res
+
+@app.post("/android/emoji")
+async def post_android_emoji(payload: Dict[str, Any]):
+    """Taps an emoji from the active keyboard panel (e.g. 'laugh', '😂', 'heart')."""
+    emoji = payload.get("emoji", "laugh")
+    if not AndroidDeviceManager:
+        raise HTTPException(status_code=503, detail="Android controller module not loaded.")
+    mgr = AndroidDeviceManager.get_instance()
+    res = mgr.tap_emoji(emoji=str(emoji), serial=payload.get("serial"))
+    return res
+
     return {
         "status": "success",
         "message": f"Updated default LLM to {provider}/{model}",

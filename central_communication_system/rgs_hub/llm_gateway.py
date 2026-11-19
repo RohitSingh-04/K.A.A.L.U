@@ -80,6 +80,14 @@ class LLMGateway:
         max_retries = 3
         last_exception = None
 
+        # Fallback sequence for Google Gemini to gracefully survive model-specific rate limits (429) & high-demand (503)
+        GEMINI_FALLBACK_MODELS = [
+            "gemini-3.1-flash-lite",
+            "gemini-2.5-flash",
+            "gemini-2.0-flash",
+            "gemini-1.5-flash"
+        ]
+
         for attempt in range(max_retries):
             try:
                 # Execute completion request via LiteLLM gateway in a thread to keep event loop free
@@ -102,33 +110,40 @@ class LLMGateway:
             except Exception as e:
                 last_exception = e
                 err_str = str(e).lower()
-                is_transient = any(phrase in err_str for phrase in [
-                    "503", "high demand", "unavailable", "429", "rate limit", "temporarily", "timeout"
+                is_rate_limit = any(phrase in err_str for phrase in ["429", "rate limit", "quota", "resource_exhausted"])
+                is_transient = is_rate_limit or any(phrase in err_str for phrase in [
+                    "503", "high demand", "unavailable", "temporarily", "timeout"
                 ])
+
                 if is_transient and attempt < max_retries - 1:
-                    wait_time = (attempt + 1) * 2
-                    print(f"[LLM Gateway] Transient error from provider ({e}). Retrying attempt {attempt + 2}/{max_retries} in {wait_time}s...")
+                    # Give extra backoff for free tier rate limits to allow bucket recovery
+                    wait_time = (attempt + 1) * 3 if is_rate_limit else (attempt + 1) * 2
+                    print(f"[LLM Gateway] Transient/Rate-limit error ({e}). Retrying attempt {attempt + 2}/{max_retries} in {wait_time}s...")
                     await asyncio.sleep(wait_time)
                     continue
 
-                # Auto fallback for Gemini high-demand / unavailability
-                if active_provider == "gemini" and "gemini-3.1-flash-lite" not in model_string:
-                    print(f"[LLM Gateway] Model '{active_model}' unavailable. Falling back to 'gemini-3.1-flash-lite'...")
-                    try:
-                        fallback_resp = await asyncio.to_thread(
-                            completion,
-                            model="gemini/gemini-3.1-flash-lite",
-                            messages=formatted_messages,
-                            **kwargs
-                        )
-                        return {
-                            "provider": active_provider,
-                            "model": "gemini-3.1-flash-lite",
-                            "response": fallback_resp.choices[0].message.content,
-                            "usage": dict(fallback_resp.usage) if hasattr(fallback_resp, "usage") else {}
-                        }
-                    except Exception as fb_err:
-                        print(f"[LLM Gateway] Fallback also failed: {fb_err}")
+                # Auto fallback for Gemini across available flash models on persistent 429 or 503
+                if active_provider == "gemini":
+                    current_clean_name = active_model.replace("gemini/", "")
+                    candidate_fallbacks = [m for m in GEMINI_FALLBACK_MODELS if m != current_clean_name]
+                    for fb_model in candidate_fallbacks:
+                        print(f"[LLM Gateway] Model '{active_model}' unavailable or rate-limited. Falling back to '{fb_model}'...")
+                        try:
+                            fallback_resp = await asyncio.to_thread(
+                                completion,
+                                model=f"gemini/{fb_model}",
+                                messages=formatted_messages,
+                                **kwargs
+                            )
+                            return {
+                                "provider": active_provider,
+                                "model": fb_model,
+                                "response": fallback_resp.choices[0].message.content,
+                                "usage": dict(fallback_resp.usage) if hasattr(fallback_resp, "usage") else {}
+                            }
+                        except Exception as fb_err:
+                            print(f"[LLM Gateway] Fallback '{fb_model}' also failed: {fb_err}")
+                            continue
 
                 print(f"[LLM Gateway Error] Failed to generate completion: {e}")
                 raise RuntimeError(f"LLM Gateway Generation Error: {str(e)}") from e

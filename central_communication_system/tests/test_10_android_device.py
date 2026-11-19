@@ -413,3 +413,298 @@ async def test_kaalu_delegates_to_android_with_confirmed_ui():
             assert mock_mgr.capture_screenshot.called
             assert mock_mgr.tap.called
             assert mock_gen.call_count == 3
+
+
+def test_tap_emoji_execution():
+    """Verify tap_emoji and type_gboard_emoji trigger Gboard universal emoji search gestures."""
+    mgr = AndroidDeviceManager(adb_path=DEFAULT_ADB_PATH)
+    commands_executed = []
+
+    def mock_run(args, **kwargs):
+        commands_executed.append(args)
+        return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
+
+    with patch.object(mgr, "_run_adb", side_effect=mock_run):
+        with patch.object(mgr, "_default_serial", return_value="fake_dev"):
+            with patch.object(mgr, "find_element", return_value=None):
+                res = mgr.tap_emoji("laugh")
+                assert res["success"] is True
+                assert res["emoji"] == "laugh"
+                assert res["coordinate"] == (229, 1213)
+                assert res["method"] == "gboard_emoji_search"
+                # Verify Gboard long-press on ',' key [205, 2320] for 450ms
+                assert any(["input", "swipe", "205", "2320", "205", "2320", "450"] == cmd[-7:] for cmd in commands_executed)
+                # Verify Gboard Search pill [280, 1280] tapped
+                assert any(["input", "tap", "280", "1280"] == cmd[-4:] for cmd in commands_executed)
+                # Verify search query 'laugh' typed
+                assert any(["input", "text", "laugh"] == cmd[-3:] for cmd in commands_executed)
+                # Verify laughing emoji [229, 1213] tapped
+                assert any(["input", "tap", "229", "1213"] == cmd[-4:] for cmd in commands_executed)
+                # Verify back arrow [72, 1045] tapped
+                assert any(["input", "tap", "72", "1045"] == cmd[-4:] for cmd in commands_executed)
+
+
+def test_auto_rotate_status_and_locking():
+    """Verify querying and toggling screen rotation lock settings."""
+    mgr = AndroidDeviceManager(adb_path=DEFAULT_ADB_PATH)
+    commands_executed = []
+
+    def mock_run(args, **kwargs):
+        commands_executed.append(args)
+        cmd_str = " ".join(args)
+        if "accelerometer_rotation" in cmd_str and "get" in cmd_str:
+            return subprocess.CompletedProcess(args=args, returncode=0, stdout="0\n", stderr="")
+        if "user_rotation" in cmd_str and "get" in cmd_str:
+            return subprocess.CompletedProcess(args=args, returncode=0, stdout="0\n", stderr="")
+        return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
+
+    with patch.object(mgr, "_run_adb", side_effect=mock_run):
+        with patch.object(mgr, "_default_serial", return_value="fake_dev"):
+            # 1. Query status
+            status = mgr.get_auto_rotate_status()
+            assert status["success"] is True
+            assert status["auto_rotate"] is False
+            assert status["is_portrait_locked"] is True
+
+            # 2. Lock rotation (enabled=False)
+            commands_executed.clear()
+            set_res = mgr.set_auto_rotate(enabled=False)
+            assert set_res["success"] is True
+            assert any(["settings", "put", "system", "accelerometer_rotation", "0"] == cmd[-5:] for cmd in commands_executed)
+            assert any(["settings", "put", "system", "user_rotation", "0"] == cmd[-5:] for cmd in commands_executed)
+
+
+def test_call_phone_cellular_and_whatsapp():
+    """Verify cellular call executes native CALL intent and WhatsApp call taps Voice call."""
+    mgr = AndroidDeviceManager(adb_path=DEFAULT_ADB_PATH)
+    commands_executed = []
+
+    def mock_run(args, **kwargs):
+        commands_executed.append(args)
+        return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
+
+    with patch.object(mgr, "_run_adb", side_effect=mock_run):
+        with patch.object(mgr, "_default_serial", return_value="fake_dev"):
+            # 1. Cellular Call
+            res_cell = mgr.call_phone("9876543210")
+            assert res_cell["success"] is True
+            assert res_cell["type"] == "cellular"
+            assert any("android.intent.action.CALL" in str(cmd) for cmd in commands_executed)
+
+            # 2. WhatsApp Audio Call
+            commands_executed.clear()
+            with patch.object(mgr, "dump_ui_hierarchy", return_value={"current_activity": "Conversation"}):
+                with patch.object(mgr, "find_element", return_value={"center": [888, 191]}):
+                    res_wa = mgr.call_phone("Diya BBA GEHU", app="whatsapp")
+                    assert res_wa["success"] is True
+                    assert res_wa["type"] == "whatsapp_voice_call"
+                    assert any(["input", "tap", "888", "191"] == cmd[-4:] for cmd in commands_executed)
+
+
+def test_send_whatsapp_macro():
+    """Verify send_whatsapp macro executes end-to-end send without multiple reasoning loops."""
+    mgr = AndroidDeviceManager(adb_path=DEFAULT_ADB_PATH)
+    commands_executed = []
+
+    def mock_run(args, **kwargs):
+        commands_executed.append(args)
+        return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
+
+    with patch.object(mgr, "_run_adb", side_effect=mock_run):
+        with patch.object(mgr, "_default_serial", return_value="fake_dev"):
+            with patch.object(mgr, "open_app") as mock_open:
+                with patch.object(mgr, "dump_ui_hierarchy", return_value={"current_activity": "Conversation"}):
+                    with patch.object(mgr, "find_element") as mock_find:
+                        # find_element returns Send button when checked
+                        mock_find.side_effect = lambda t, **kwargs: {"center": [1000, 2210]} if t == "Send" else None
+                        with patch.object(mgr, "type_text") as mock_type:
+                            with patch.object(mgr, "type_gboard_emoji") as mock_emoji:
+                                res = mgr.send_whatsapp("Diya BBA GEHU", message="hello", emoji="laugh")
+                                assert res["success"] is True
+                                assert res["action"] == "send_whatsapp"
+                                assert res["verified"] is True
+                                assert mock_open.called
+                                assert mock_type.called
+                                assert mock_emoji.called
+
+
+def test_send_whatsapp_prevents_voice_recording():
+    """Verify send_whatsapp explicitly DOES NOT tap if Voice message button is active."""
+    mgr = AndroidDeviceManager(adb_path=DEFAULT_ADB_PATH)
+    commands_executed = []
+
+    def mock_run(args, **kwargs):
+        commands_executed.append(args)
+        return subprocess.CompletedProcess(args=args, returncode=0, stdout="", stderr="")
+
+    with patch.object(mgr, "_run_adb", side_effect=mock_run):
+        with patch.object(mgr, "_default_serial", return_value="fake_dev"):
+            with patch.object(mgr, "open_app"):
+                with patch.object(mgr, "dump_ui_hierarchy", return_value={"current_activity": "Conversation"}):
+                    with patch.object(mgr, "find_element") as mock_find:
+                        def fake_find(target, **kwargs):
+                            if target in ("Voice message", "voice_note_btn"):
+                                return {"center": [980, 2218]}
+                            if target == "Send":
+                                return None
+                            return None
+                        mock_find.side_effect = fake_find
+
+                        res = mgr.send_whatsapp("Project X", emoji="laugh")
+                        assert res["success"] is True
+                        # Verify NO tap was issued at [980, 2218] (which would activate voice recording)
+                        assert not any(["input", "tap", "980", "2218"] == cmd[-4:] for cmd in commands_executed)
+
+
+def test_kaalu_macro_helper_methods():
+    """Verify Kaalu exposes android_send_whatsapp, android_call, and android_tap_emoji."""
+    mock_mgr = MagicMock()
+    mock_mgr.send_whatsapp.return_value = {"success": True, "action": "send_whatsapp"}
+    mock_mgr.call_phone.return_value = {"success": True, "action": "call_phone"}
+    mock_mgr.tap_emoji.return_value = {"success": True, "action": "tap_emoji"}
+
+    kaalu = KaaluOrchestrator(android_manager=mock_mgr)
+    assert kaalu.android_send_whatsapp("Diya", message="hi")["success"] is True
+    assert kaalu.android_call("Diya", app="whatsapp")["success"] is True
+    assert kaalu.android_tap_emoji("laugh")["success"] is True
+
+
+@pytest.mark.asyncio
+async def test_kaalu_delegates_to_send_whatsapp_macro():
+    """Verify Kaalu completes WhatsApp send in 1 step using the send_whatsapp macro."""
+    mock_mgr = MagicMock()
+    mock_mgr.list_devices_details.return_value = [{
+        "serial": "fake_dev",
+        "market_name": "OnePlus Phone",
+        "model": "IV2201",
+        "brand": "OnePlus"
+    }]
+    mock_mgr.send_whatsapp.return_value = {
+        "success": True,
+        "action": "send_whatsapp",
+        "contact": "Diya BBA GEHU",
+        "message": "hello",
+        "verified": True
+    }
+
+    kaalu = KaaluOrchestrator(android_manager=mock_mgr)
+
+    step1_response = json.dumps({
+        "thought": "The user wants to send 'hello' to Diya BBA GEHU on WhatsApp. I will use the ultra-efficient send_whatsapp macro to complete this in one action.",
+        "action": "delegate",
+        "recipient": "android",
+        "task_action": "send_whatsapp",
+        "payload": {
+            "contact": "Diya BBA GEHU",
+            "message": "hello"
+        }
+    })
+
+    step2_response = json.dumps({
+        "thought": "Message has been verified sent on WhatsApp.",
+        "action": "finish",
+        "final_answer": "Successfully sent 'hello' to Diya BBA GEHU on WhatsApp.",
+        "voice_response": "I have sent hello to Diya on WhatsApp."
+    })
+
+    with patch.object(kaalu.ws_client, "connect_server", new_callable=AsyncMock):
+        with patch.object(kaalu.llm_client, "generate_async", new_callable=AsyncMock, side_effect=[step1_response, step2_response]):
+            res = await kaalu.process_user_goal('send "hello" to Diya BBA GEHU on whatsapp using my phone')
+            assert res["status"] == "completed"
+            assert mock_mgr.send_whatsapp.called
+            assert res["steps_taken"] == 2
+
+
+@pytest.mark.asyncio
+async def test_dynamic_context_filtering_skips_apps_context_on_mobile():
+    """Verify mobile tasks omit job tracker applications context to avoid TPM rate limits."""
+    mock_mgr = MagicMock()
+    mock_mgr.list_devices_details.return_value = []
+    mock_job_tracker = MagicMock()
+    mock_job_tracker.to_prompt_context.return_value = "HUGE APPLICATION LIST" * 200
+
+    kaalu = KaaluOrchestrator(android_manager=mock_mgr, job_tracker=mock_job_tracker)
+
+    captured_messages = []
+
+    async def mock_generate(messages):
+        captured_messages.extend(messages)
+        return json.dumps({
+            "thought": "Done",
+            "action": "finish",
+            "final_answer": "Done",
+            "voice_response": "Done"
+        })
+
+    with patch.object(kaalu.ws_client, "connect_server", new_callable=AsyncMock):
+        with patch.object(kaalu.llm_client, "generate_async", side_effect=mock_generate):
+            # 1. Mobile Task: should NOT contain apps_context
+            await kaalu.process_user_goal("call Diya on my phone")
+            all_content = " ".join(m["content"] for m in captured_messages)
+            assert "HUGE APPLICATION LIST" not in all_content
+
+            # 2. Job Task: SHOULD contain apps_context
+            captured_messages.clear()
+            await kaalu.process_user_goal("what jobs have I applied to?")
+            all_content_job = " ".join(m["content"] for m in captured_messages)
+            assert "HUGE APPLICATION LIST" in all_content_job
+
+
+@pytest.mark.asyncio
+async def test_kaalu_delegates_to_gboard_emoji_and_rotation_control():
+    """Verify Kaalu handles delegating gboard_emoji and set_auto_rotate to AndroidDeviceManager."""
+    mock_mgr = MagicMock()
+    mock_mgr.list_devices_details.return_value = []
+    mock_mgr.type_gboard_emoji.return_value = {
+        "success": True,
+        "action": "type_gboard_emoji",
+        "emoji": "laugh",
+        "coordinate": [450, 1680],
+        "method": "gboard_universal"
+    }
+    mock_mgr.set_auto_rotate.return_value = {
+        "success": True,
+        "action": "set_auto_rotate",
+        "enabled": False,
+        "status": {"auto_rotate": False, "is_portrait_locked": True}
+    }
+
+    kaalu = KaaluOrchestrator(android_manager=mock_mgr)
+
+    # 1. Test gboard_emoji delegation
+    step1_emoji = json.dumps({
+        "thought": "Typing laughing emoji via Gboard.",
+        "action": "delegate",
+        "recipient": "android",
+        "task_action": "gboard_emoji",
+        "payload": {"emoji": "laugh"}
+    })
+    step2_finish = json.dumps({
+        "thought": "Emoji entered.",
+        "action": "finish",
+        "final_answer": "Sent laughing emoji.",
+        "voice_response": "Emoji sent."
+    })
+
+    with patch.object(kaalu.ws_client, "connect_server", new_callable=AsyncMock):
+        with patch.object(kaalu.llm_client, "generate_async", side_effect=[step1_emoji, step2_finish]):
+            res = await kaalu.process_user_goal("type laughing emoji")
+            assert res["status"] == "completed"
+            assert mock_mgr.type_gboard_emoji.called
+
+    # 2. Test set_auto_rotate delegation
+    step1_rotate = json.dumps({
+        "thought": "Locking screen rotation to portrait mode.",
+        "action": "delegate",
+        "recipient": "android",
+        "task_action": "set_auto_rotate",
+        "payload": {"enabled": False}
+    })
+
+    with patch.object(kaalu.ws_client, "connect_server", new_callable=AsyncMock):
+        with patch.object(kaalu.llm_client, "generate_async", side_effect=[step1_rotate, step2_finish]):
+            res = await kaalu.process_user_goal("lock phone rotation to portrait")
+            assert res["status"] == "completed"
+            assert mock_mgr.set_auto_rotate.called
+
+

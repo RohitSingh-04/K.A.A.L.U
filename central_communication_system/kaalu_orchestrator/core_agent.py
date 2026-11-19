@@ -1,5 +1,6 @@
 import asyncio
 import json
+from pathlib import Path
 import re
 import sys
 from typing import Any, Dict, List, Optional
@@ -47,7 +48,7 @@ except (ImportError, ValueError):
         except (ImportError, ValueError):
             AndroidDeviceManager = None
 
-from kaalu_orchestrator.prompts import KAALU_SYSTEM_PROMPT
+from kaalu_orchestrator.prompts import KAALU_SYSTEM_PROMPT, get_kaalu_system_prompt
 from kaalu_orchestrator.ws_client import KaaluWSClient
 from kaalu_orchestrator.rgs_llm_client import RGSLLMClient
 
@@ -239,6 +240,63 @@ class KaaluOrchestrator:
             return {"success": False, "error": "AndroidDeviceManager not initialized."}
         return self.android_mgr.shell(command=command, serial=serial)
 
+    def android_send_whatsapp(
+        self,
+        contact: str,
+        message: str = "",
+        emoji: Optional[str] = None,
+        serial: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Sends a WhatsApp message or emoji in a single high-speed macro action."""
+        if not self.android_mgr:
+            return {"success": False, "error": "AndroidDeviceManager not initialized."}
+        return self.android_mgr.send_whatsapp(contact=contact, message=message, emoji=emoji, serial=serial)
+
+    def android_call(self, target: str, app: str = "phone", serial: Optional[str] = None) -> Dict[str, Any]:
+        """Places a phone call or WhatsApp voice call in a single high-speed action."""
+        if not self.android_mgr:
+            return {"success": False, "error": "AndroidDeviceManager not initialized."}
+        return self.android_mgr.call_phone(target=target, app=app, serial=serial)
+
+    def android_tap_emoji(self, emoji: str = "laugh", serial: Optional[str] = None) -> Dict[str, Any]:
+        """Taps an emoji directly via Gboard's universal emoji palette."""
+        if not self.android_mgr:
+            return {"success": False, "error": "AndroidDeviceManager not initialized."}
+        return self.android_mgr.tap_emoji(emoji=emoji, serial=serial)
+
+    def android_gboard_emoji(self, emoji: str = "laugh", target: Optional[str] = None, serial: Optional[str] = None) -> Dict[str, Any]:
+        """Universally types an emoji using Gboard across any Android app."""
+        if not self.android_mgr:
+            return {"success": False, "error": "AndroidDeviceManager not initialized."}
+        return self.android_mgr.type_gboard_emoji(emoji=emoji, target=target, serial=serial)
+
+    def android_set_auto_rotate(self, enabled: bool = False, serial: Optional[str] = None) -> Dict[str, Any]:
+        """Locks screen orientation in portrait or enables auto-rotate."""
+        if not self.android_mgr:
+            return {"success": False, "error": "AndroidDeviceManager not initialized."}
+        return self.android_mgr.set_auto_rotate(enabled=enabled, serial=serial)
+
+    def android_rotation_status(self, serial: Optional[str] = None) -> Dict[str, Any]:
+        """Queries current screen auto-rotation setting."""
+        if not self.android_mgr:
+            return {"success": False, "error": "AndroidDeviceManager not initialized."}
+        return self.android_mgr.get_auto_rotate_status(serial=serial)
+
+    def _detect_active_model(self) -> str:
+        """Determines the current cloud LLM model configured in the RGS Gateway settings."""
+        settings_path = Path(__file__).resolve().parent.parent / "rgs_hub" / "settings.yaml"
+        if settings_path.exists():
+            try:
+                import yaml
+                with open(settings_path, "r", encoding="utf-8") as f:
+                    cfg = yaml.safe_load(f) or {}
+                    model = cfg.get("llm", {}).get("default_model")
+                    if model:
+                        return str(model)
+            except Exception:
+                pass
+        return "gemini-3.1-flash-lite"
+
     def reset_session(self):
         """Clear multi-turn session history."""
         self.conversation_history.clear()
@@ -293,16 +351,36 @@ class KaaluOrchestrator:
         # 1. Ensure WebSocket connection to RGS Hub is established
         await self.ws_client.connect_server()
 
-        # 2. Build conversation context including system prompt and prior chat history
+        # 2. Build conversation context with active cloud model injected into the system prompt
+        active_model = self._detect_active_model()
         messages: List[Dict[str, str]] = [
-            {"role": "system", "content": KAALU_SYSTEM_PROMPT}
+            {"role": "system", "content": get_kaalu_system_prompt(active_model)}
         ]
+
+        # Determine task type to dynamically optimize context and prevent TPM limit exhaustion
+        mobile_keywords = (
+            "phone", "mobile", "whatsapp", "call", "sms", "tap", "swipe",
+            "screen", "oneplus", "android", "device", "dial", "emoji"
+        )
+        is_mobile_task = any(kw in goal.lower() for kw in mobile_keywords)
 
         # Inject verified User Profile if available
         if self.profile_manager:
             user_profile = self.profile_manager.load_profile()
             if user_profile:
-                profile_context = user_profile.to_prompt_context()
+                if is_mobile_task:
+                    # For mobile operations, inject only minimal user info to conserve tokens
+                    b_details = getattr(user_profile, "basic_details", None)
+                    u_name = getattr(b_details, "name", "") if b_details else getattr(user_profile, "name", "User")
+                    u_phone = getattr(b_details, "phone", "") if b_details else getattr(user_profile, "phone", "")
+                    u_email = getattr(b_details, "email", "") if b_details else getattr(user_profile, "email", "")
+                    profile_context = (
+                        f"User Name: {u_name}\n"
+                        f"Contact Phone: {u_phone}\n"
+                        f"Contact Email: {u_email}"
+                    )
+                else:
+                    profile_context = user_profile.to_prompt_context()
                 messages.append({
                     "role": "system",
                     "content": (
@@ -312,8 +390,11 @@ class KaaluOrchestrator:
                     )
                 })
 
-        # Inject Tracked Job Applications & Resumes if available
-        if self.job_tracker:
+        # Inject Tracked Job Applications & Resumes only if not a mobile task or if job-related
+        job_keywords = ("job", "resume", "apply", "application", "interview", "career", "tracker", "position")
+        needs_job_context = any(kw in goal.lower() for kw in job_keywords)
+
+        if self.job_tracker and (needs_job_context or not is_mobile_task):
             apps_context = self.job_tracker.to_prompt_context()
             if apps_context:
                 messages.append({
@@ -547,6 +628,33 @@ class KaaluOrchestrator:
                                     command=str(payload.get("command", "")),
                                     serial=serial
                                 )
+                            elif task_action in ("send_whatsapp", "whatsapp_send", "whatsapp_message"):
+                                observation = self.android_mgr.send_whatsapp(
+                                    contact=str(payload.get("contact") or payload.get("target") or payload.get("to", "")),
+                                    message=str(payload.get("message") or payload.get("text", "")),
+                                    emoji=payload.get("emoji"),
+                                    auto_send=bool(payload.get("auto_send", payload.get("send", True))),
+                                    serial=serial
+                                )
+                            elif task_action in ("call_phone", "call", "make_call", "voice_call"):
+                                observation = self.android_mgr.call_phone(
+                                    target=str(payload.get("target") or payload.get("contact") or payload.get("number") or payload.get("phone", "")),
+                                    app=str(payload.get("app", "phone")),
+                                    serial=serial
+                                )
+                            elif task_action in ("tap_emoji", "emoji", "gboard_emoji", "type_gboard_emoji"):
+                                observation = self.android_mgr.type_gboard_emoji(
+                                    emoji=str(payload.get("emoji") or payload.get("type", "laugh")),
+                                    target=payload.get("target"),
+                                    serial=serial
+                                )
+                            elif task_action in ("set_auto_rotate", "auto_rotate", "lock_rotation"):
+                                observation = self.android_mgr.set_auto_rotate(
+                                    enabled=bool(payload.get("enabled", False)),
+                                    serial=serial
+                                )
+                            elif task_action in ("get_rotation_status", "rotation_status"):
+                                observation = self.android_mgr.get_auto_rotate_status(serial=serial)
                             elif task_action in ("get_device_info", "list_devices", "status"):
                                 devs = self.android_mgr.list_devices_details()
                                 observation = {"success": True, "count": len(devs), "devices": devs}
@@ -581,13 +689,46 @@ class KaaluOrchestrator:
 
                 print(f"[Kaalu] Observation from '{recipient}': {observation}")
 
+                # Compact observation data before injecting into LLM context to prevent TPM rate limits
+                obs_for_llm = dict(observation) if isinstance(observation, dict) else {"result": observation}
+                obs_for_llm.pop("screenshot_base64", None)
+
+                # Cap visible_texts to max 15 items
+                if "visible_texts" in obs_for_llm and isinstance(obs_for_llm["visible_texts"], list):
+                    obs_for_llm["visible_texts"] = [t for t in obs_for_llm["visible_texts"] if str(t).strip()][:15]
+
+                # Cap and simplify interactive_elements to max 10 labeled items
+                if "interactive_elements" in obs_for_llm and isinstance(obs_for_llm["interactive_elements"], list):
+                    compact_elems = []
+                    for el in obs_for_llm["interactive_elements"][:10]:
+                        item = {"center": el.get("center")}
+                        if el.get("label"):
+                            item["label"] = el.get("label")
+                        elif el.get("text"):
+                            item["text"] = el.get("text")
+                        if el.get("type"):
+                            item["type"] = el.get("type")
+                        compact_elems.append(item)
+                    obs_for_llm["interactive_elements"] = compact_elems
+
+                # Compress intermediate turns if context is growing large (>10 messages)
+                if len(messages) > 10:
+                    for midx in range(3, len(messages) - 2):
+                        m = messages[midx]
+                        if m.get("role") == "user" and len(m.get("content", "")) > 250:
+                            first_line = m["content"].split("\n")[0]
+                            messages[midx] = {
+                                "role": "user",
+                                "content": f"{first_line} -> (completed successfully)"
+                            }
+
                 # Update conversation history with the action and observation for next reasoning turn
                 messages.append({"role": "assistant", "content": llm_response})
                 messages.append({
                     "role": "user",
                     "content": (
                         f"Observation from '{recipient}' for action '{task_action}':\n"
-                        f"{json.dumps(observation, indent=2)}\n\n"
+                        f"{json.dumps(obs_for_llm, indent=2)}\n\n"
                         "Evaluate this observation. If the objective is complete, respond with action 'finish'. "
                         "Otherwise, take the next delegated action. Output JSON only."
                     )
