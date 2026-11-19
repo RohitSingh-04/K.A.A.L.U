@@ -6,7 +6,7 @@ Project KAALU V2 is an autonomous multi-agent desktop, browser, and mobile orche
 
 
 
-**---**
+---
 
 
 
@@ -16,7 +16,7 @@ Project KAALU V2 is an autonomous multi-agent desktop, browser, and mobile orche
 
 
 
-**---**
+---
 
 
 
@@ -769,7 +769,6 @@ adb shell dumpsys window | grep -E "mCurrentFocus"
 
 - **Universal Gboard Emoji Search**: Uses Google Gboard's deterministic emoji search (`Q Search` on Gboard) rather than dynamic Recent Emojis. This ensures that emojis like `😂` (laugh), `❤️` (heart), and `👍` (thumbs up) type reliably across all chat applications regardless of user history.
 - **WhatsApp Voice Recording Prevention Guard**: When sending WhatsApp messages, Kaalu explicitly verifies that the Send button is visible before dispatching taps. If the input field is empty and WhatsApp displays the microphone button (`voice_note_btn`), fallback taps are strictly skipped, preventing unintentional voice note recordings.
-- **OxygenOS Auto-Rotate Override Diagnostics**: OxygenOS features *"Face-based Smart Rotation"* (`com.aiunit.aon`) and corporate Work Profile policies (`com.google.android.apps.work.clouddpc`) that can override rotation lock. Kaalu exposes `set_auto_rotate(enabled=False)` to lock portrait mode programmatically.
 - **Token & Rate-Limit (TPM) Optimizations**: Macro actions (`send_whatsapp`, `call_phone`) execute end-to-end in a single turn, and mobile operations dynamically omit job tracking history, cutting token consumption by >70% per turn on the Gemini Free Tier.
 - **Hardware-Encrypted Phone Credentials (Windows DPAPI)**: Phone unlock credentials (PIN / password) are encrypted using Windows Data Protection API (`CryptProtectData`), binding the key to the current machine and user account. Plaintext secrets are never stored on disk and never exposed in REST responses or logs. When the user asks Kaalu to unlock their phone (*"Kaalu, unlock my phone"*), the orchestrator automatically decrypts the PIN in memory and completes the unlock sequence without requiring manual input. Manage or update credentials anytime from the `/settings` web dashboard.
 
