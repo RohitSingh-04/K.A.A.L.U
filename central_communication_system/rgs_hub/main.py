@@ -1,5 +1,8 @@
+import asyncio
+import json
 import os
 import re
+import threading
 import time
 from datetime import datetime
 from pathlib import Path
@@ -7,10 +10,12 @@ from typing import Optional, List, Dict, Any
 import httpx
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, UploadFile, File, Request, Query, Response
 from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from rgs_hub.ws_manager import ConnectionManager
 from rgs_hub.schemas import AgentMessage, LLMGenerationRequest, LLMGenerationResponse
 from rgs_hub.llm_gateway import LLMGateway
+from rgs_hub.gui_ui import render_gui_page
 from user_profile import (
     ProfileManager,
     ProfileGenerator,
@@ -57,6 +62,44 @@ app.add_middleware(
 manager = ConnectionManager()
 llm_gateway = LLMGateway()
 
+# ----------------- Animation Assets & Storage -----------------
+ANIMATIONS_DIR = Path(__file__).resolve().parent.parent.parent / "Animations"
+ANIMATION_CONFIG_FILE = Path(__file__).resolve().parent.parent / "data" / "animation_settings.json"
+kaalu_runner_ws: Optional[WebSocket] = None
+
+def get_available_animations() -> List[str]:
+    """Scans Animations/ directory for available .mp4 animations."""
+    if not ANIMATIONS_DIR.exists():
+        return []
+    return sorted([f.name for f in ANIMATIONS_DIR.glob("*.mp4") if f.is_file()])
+
+def get_configured_animation() -> str:
+    """Reads configured animation name, defaulting to jarvis-30-fps-1600x1600.mp4 or first available."""
+    avail = get_available_animations()
+    if ANIMATION_CONFIG_FILE.exists():
+        try:
+            with open(ANIMATION_CONFIG_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                anim = data.get("active_animation")
+                if anim and anim in avail:
+                    return anim
+        except Exception:
+            pass
+    for preferred in ["jarvis-30-fps-1600x1600.mp4", "jarvis-blue.mp4"]:
+        if preferred in avail:
+            return preferred
+    return avail[0] if avail else ""
+
+def save_configured_animation(anim_name: str) -> None:
+    """Persists active animation setting."""
+    ANIMATION_CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with open(ANIMATION_CONFIG_FILE, "w", encoding="utf-8") as f:
+        json.dump({"active_animation": anim_name.strip()}, f, indent=2)
+
+# Mount /animations static directory
+if ANIMATIONS_DIR.exists():
+    app.mount("/animations", StaticFiles(directory=str(ANIMATIONS_DIR)), name="animations")
+
 def get_available_voices() -> List[str]:
     """Scans voice models directory for available ONNX voice models."""
     if not Speaker or not hasattr(Speaker, "models_dir") or not Speaker.models_dir.exists():
@@ -72,28 +115,56 @@ def get_available_voices() -> List[str]:
 
 
 async def check_resume_builder_status(url: str = "http://localhost:5173/") -> Dict[str, Any]:
-    """Probes the standalone Resume Builder web application with a low-latency check."""
+    """Probes the standalone Resume Builder web application across IPv4 and localhost concurrently."""
     start_ts = time.time()
-    try:
-        async with httpx.AsyncClient(timeout=1.5) as client:
-            resp = await client.get(url)
-            elapsed = round((time.time() - start_ts) * 1000, 1)
+    candidates = [
+        url,
+        "http://127.0.0.1:5173/",
+        "http://localhost:5173/",
+        "http://127.0.0.1:5174/",
+        "http://localhost:5174/",
+        "http://127.0.0.1:8005/",
+        "http://localhost:8005/"
+    ]
+    seen = set()
+    unique_candidates = [c for c in candidates if not (c in seen or seen.add(c))]
+
+    async def _probe_target(target: str):
+        try:
+            async with httpx.AsyncClient(timeout=0.4) as client:
+                resp = await client.get(target)
+                if resp.status_code < 500:
+                    return {
+                        "online": True,
+                        "status_code": resp.status_code,
+                        "url": target,
+                        "error": None
+                    }
+        except Exception as exc:
             return {
-                "online": resp.status_code < 500,
-                "status_code": resp.status_code,
-                "latency_ms": elapsed,
-                "url": url,
-                "error": None
+                "online": False,
+                "status_code": None,
+                "url": target,
+                "error": str(exc)
             }
-    except Exception as exc:
-        elapsed = round((time.time() - start_ts) * 1000, 1)
-        return {
-            "online": False,
-            "status_code": None,
-            "latency_ms": elapsed,
-            "url": url,
-            "error": str(exc)
-        }
+        return {"online": False, "status_code": resp.status_code, "url": target, "error": f"HTTP {resp.status_code}"}
+
+    results = await asyncio.gather(*[_probe_target(c) for c in unique_candidates])
+    elapsed = round((time.time() - start_ts) * 1000, 1)
+
+    for res in results:
+        if res.get("online"):
+            res["latency_ms"] = elapsed
+            return res
+
+    last_err = results[0].get("error") if results else "Connection refused"
+    return {
+        "online": False,
+        "status_code": None,
+        "latency_ms": elapsed,
+        "url": url,
+        "error": last_err or "Connection refused"
+    }
 
 
 async def build_system_status() -> Dict[str, Any]:
@@ -195,6 +266,12 @@ async def build_system_status() -> Dict[str, Any]:
         except Exception as e:
             print(f"[RGS Hub Warning] Error querying Android devices/credentials: {e}")
 
+    anim_info = {
+        "active_animation": get_configured_animation(),
+        "available_animations": get_available_animations(),
+        "gui_mode": os.environ.get("KAALU_GUI_MODE") == "1"
+    }
+
     return {
         "status": "success",
         "timestamp": datetime.now().isoformat(),
@@ -209,8 +286,56 @@ async def build_system_status() -> Dict[str, Any]:
         "android_credentials": android_credentials,
         "services": services_info,
         "voice": voice_info,
+        "animations": anim_info,
         "llm": llm_info
     }
+
+@app.get("/gui", response_class=HTMLResponse)
+async def get_gui_page():
+    """Renders the 2-Tab Interactive GUI (Live Terminal + Hologram Avatar & Voice Ears)."""
+    anim = get_configured_animation()
+    voice = getattr(Speaker, "voice_name", "jarvis-gb") if Speaker else "jarvis-gb"
+    return HTMLResponse(content=render_gui_page(active_animation=anim, active_voice=voice))
+
+@app.get("/api/animations")
+async def get_animations_endpoint():
+    """Lists available animations in the Animations/ folder and active selection."""
+    return {
+        "status": "success",
+        "animations": get_available_animations(),
+        "active": get_configured_animation(),
+        "gui_mode": os.environ.get("KAALU_GUI_MODE") == "1"
+    }
+
+@app.post("/api/animations/select")
+async def select_animation_endpoint(payload: Dict[str, Any]):
+    """Switches the active animation avatar."""
+    anim_name = payload.get("animation")
+    if not anim_name:
+        raise HTTPException(status_code=400, detail="Missing required field 'animation'.")
+    avail = get_available_animations()
+    if anim_name not in avail:
+        raise HTTPException(status_code=404, detail=f"Animation '{anim_name}' not found in Animations folder.")
+    save_configured_animation(anim_name)
+    return {
+        "status": "success",
+        "message": f"Active animation switched to '{anim_name}'.",
+        "active": anim_name
+    }
+
+@app.post("/voice/stop")
+@app.post("/api/voice/stop")
+async def stop_voice_endpoint():
+    """Halts active neural TTS voice output immediately (e.g. when user speaks)."""
+    if Speaker:
+        Speaker.stop()
+    global kaalu_runner_ws
+    if kaalu_runner_ws is not None:
+        try:
+            await kaalu_runner_ws.send_json({"action": "stop_voice"})
+        except Exception:
+            pass
+    return {"status": "success", "message": "Voice playback stopped."}
 
 @app.get("/settings", response_class=HTMLResponse)
 async def get_settings_page():
@@ -222,6 +347,12 @@ async def get_settings_page():
 async def get_system_status_endpoint():
     """Returns real-time telemetry: Resume Builder online check, connected agents, voice, LLM, and services."""
     return await build_system_status()
+
+@app.get("/api/probe/resumebuilder")
+@app.post("/api/probe/resumebuilder")
+async def probe_resume_builder_endpoint():
+    """Explicitly probes the Resume Builder ports across IPv4/localhost and returns real-time status."""
+    return await check_resume_builder_status()
 
 @app.post("/voice/change")
 @app.post("/api/settings/voice")
@@ -1045,6 +1176,195 @@ async def get_job_application(application_id: str):
         "status": "success",
         "application": rec.model_dump()
     }
+
+active_hub_goal_id: int = 0
+
+async def _run_kaalu_goal_background(goal: str, query_id: Optional[int] = None):
+    global active_hub_goal_id
+    active_hub_goal_id += 1
+    my_goal_id = query_id if query_id is not None else active_hub_goal_id
+    active_hub_goal_id = max(active_hub_goal_id, my_goal_id)
+
+    # Silence any previous voice
+    if Speaker:
+        Speaker.stop()
+
+    try:
+        from kaalu_orchestrator.core_agent import KaaluOrchestrator
+        orchestrator = KaaluOrchestrator()
+        async def _cb(evt):
+            if query_id is not None:
+                evt["query_id"] = query_id
+            await manager.broadcast_terminal(evt)
+        res = await orchestrator.process_user_goal(goal, step_callback=_cb)
+        final_answer = res.get("final_answer", str(res)) if isinstance(res, dict) else str(res)
+        voice_text = res.get("voice_response") if isinstance(res, dict) else None
+        if not voice_text:
+            voice_text = final_answer
+
+        is_latest = (my_goal_id == active_hub_goal_id)
+        finish_payload = {
+            "type": "finish",
+            "source": "kaalu",
+            "final_answer": final_answer,
+            "voice_response": voice_text,
+            "is_latest": is_latest,
+            "superseded": not is_latest
+        }
+        if query_id is not None:
+            finish_payload["query_id"] = query_id
+        await manager.broadcast_terminal(finish_payload)
+
+        # Only speak if this is still the active, latest goal
+        if is_latest and Speaker:
+            try:
+                speak_text = voice_text if voice_text.strip().lower().startswith("sir,") else f"Sir, {voice_text}"
+                threading.Thread(target=Speaker.speak, args=(speak_text,), kwargs={"speech_id": my_goal_id}, daemon=True).start()
+            except Exception:
+                pass
+        await orchestrator.close()
+    except Exception as e:
+        await manager.broadcast_terminal({
+            "type": "error",
+            "source": "system",
+            "message": f"Kaalu background execution error: {e}",
+            "query_id": query_id
+        })
+
+@app.post("/api/kaalu/goal")
+async def post_kaalu_goal_endpoint(payload: Dict[str, Any]):
+    """Dispatches user goal (from voice ears or terminal) to Kaalu."""
+    global active_hub_goal_id
+    goal = payload.get("goal")
+    query_id = payload.get("query_id")
+    if not goal or not str(goal).strip():
+        raise HTTPException(status_code=400, detail="Missing required field 'goal'.")
+
+    active_hub_goal_id += 1
+    my_goal_id = query_id if query_id is not None else active_hub_goal_id
+    active_hub_goal_id = max(active_hub_goal_id, my_goal_id)
+
+    # Immediately silence previous voice on hub and runner
+    if Speaker:
+        Speaker.stop()
+    global kaalu_runner_ws
+    if kaalu_runner_ws is not None:
+        try:
+            await kaalu_runner_ws.send_json({"action": "stop_voice"})
+        except Exception:
+            pass
+
+    goal_str = str(goal).strip()
+    await manager.broadcast_terminal({
+        "timestamp": datetime.now().strftime("%H:%M:%S"),
+        "source": "user",
+        "type": "start",
+        "message": f"User Objective: {goal_str}",
+        "query_id": my_goal_id
+    })
+
+    if kaalu_runner_ws is not None:
+        try:
+            await kaalu_runner_ws.send_json({
+                "action": "user_goal",
+                "goal": goal_str,
+                "query_id": my_goal_id,
+                "active_goal_id": active_hub_goal_id
+            })
+            return {"status": "dispatched", "message": f"Objective dispatched: {goal_str}", "query_id": my_goal_id}
+        except Exception as ws_err:
+            print(f"[RGS Hub Warning] WS dispatch failed: {ws_err}")
+            kaalu_runner_ws = None
+
+    # Fallback to direct execution
+    try:
+        from kaalu_orchestrator.core_agent import KaaluOrchestrator
+        orchestrator = KaaluOrchestrator()
+        async def _cb(evt):
+            if query_id is not None:
+                evt["query_id"] = query_id
+            await manager.broadcast_terminal(evt)
+        res = await orchestrator.process_user_goal(goal_str, step_callback=_cb)
+        final_answer = res.get("final_answer", str(res)) if isinstance(res, dict) else str(res)
+        voice_text = res.get("voice_response") if isinstance(res, dict) else None
+        if not voice_text:
+            voice_text = final_answer
+
+        is_latest = (my_goal_id == active_hub_goal_id)
+        # Only speak if this is still the active latest goal (newer query has not superseded it)
+        if is_latest and Speaker:
+            try:
+                speak_text = voice_text if voice_text.strip().lower().startswith("sir,") else f"Sir, {voice_text}"
+                threading.Thread(target=Speaker.speak, args=(speak_text,), kwargs={"speech_id": my_goal_id}, daemon=True).start()
+            except Exception:
+                pass
+        await orchestrator.close()
+        return {
+            "status": "completed",
+            "final_answer": final_answer,
+            "voice_response": voice_text,
+            "query_id": my_goal_id,
+            "is_latest": is_latest
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Execution failed: {exc}")
+
+@app.websocket("/ws/terminal")
+async def websocket_terminal_endpoint(websocket: WebSocket):
+    """GUI Live Terminal stream: broadcasts all multi-agent events, steps, and system logs."""
+    await manager.subscribe_terminal(websocket)
+    try:
+        while True:
+            data = await websocket.receive_json()
+            action = data.get("action")
+            if action in ("user_goal", "execute_goal"):
+                goal = data.get("goal") or data.get("payload", {}).get("goal", "")
+                if goal:
+                    global kaalu_runner_ws
+                    if kaalu_runner_ws:
+                        await kaalu_runner_ws.send_json({"action": "user_goal", "goal": goal})
+                    else:
+                        asyncio.create_task(_run_kaalu_goal_background(str(goal)))
+            elif action == "stop_voice":
+                if Speaker:
+                    Speaker.stop()
+                if kaalu_runner_ws is not None:
+                    try:
+                        await kaalu_runner_ws.send_json({"action": "stop_voice"})
+                    except Exception:
+                        pass
+    except WebSocketDisconnect:
+        manager.unsubscribe_terminal(websocket)
+
+@app.websocket("/ws/kaalu_dispatch")
+async def websocket_kaalu_dispatch(websocket: WebSocket):
+    """Direct WebSocket dispatcher between Kaalu Agent Runner and RGS Hub / GUI."""
+    global kaalu_runner_ws
+    await websocket.accept()
+    kaalu_runner_ws = websocket
+    print("[RGS Hub] Kaalu Orchestrator connected to GUI Dispatcher.")
+    await manager.broadcast_terminal({
+        "timestamp": datetime.now().strftime("%H:%M:%S"),
+        "source": "kaalu",
+        "type": "connect",
+        "message": "Kaalu Orchestrator registered on GUI Dispatcher."
+    })
+    try:
+        while True:
+            data = await websocket.receive_json()
+            if data.get("type") == "finish":
+                q_id = data.get("query_id")
+                if q_id is not None and q_id < active_hub_goal_id:
+                    data["is_latest"] = False
+                    data["superseded"] = True
+                else:
+                    data["is_latest"] = True
+                    data["superseded"] = False
+            await manager.broadcast_terminal(data)
+    except WebSocketDisconnect:
+        print("[RGS Hub] Kaalu Orchestrator disconnected from GUI Dispatcher.")
+        if kaalu_runner_ws == websocket:
+            kaalu_runner_ws = None
 
 @app.websocket("/ws/{client_id}")
 async def websocket_endpoint(websocket: WebSocket, client_id: str):

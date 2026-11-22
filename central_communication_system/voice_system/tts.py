@@ -4,6 +4,9 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
+import time
+from typing import Optional, Union, Dict, Any
 from pathlib import Path
 
 # Fix for Linux checkpoints loaded on Windows
@@ -104,6 +107,11 @@ class VoiceEngine:
         self.voice = None
         self.voice_name = None
         self.model_config = None
+        self._speech_lock = threading.Lock()
+        self._active_speech_id: int = 0
+        self._current_speech_id: int = 0
+        self._is_stopped = False
+        self._current_stream = None
 
         target_voice = default_voice or get_configured_voice()
         if target_voice:
@@ -299,8 +307,8 @@ class VoiceEngine:
         self.set_voice(name)
         return model_path
 
-    def speak(self, text: str, speed=1.0):
-        """Generate speech and play it immediately with automated text cleaning."""
+    def speak(self, text: str, speed: float = 1.0, speech_id: Optional[int] = None):
+        """Generate speech and play it immediately with automated text cleaning and mutual exclusion."""
         # Ensure active voice is synchronized with persistent settings
         self.sync_voice()
 
@@ -313,6 +321,20 @@ class VoiceEngine:
         if not cleaned_text:
             return
 
+        with self._speech_lock:
+            self._active_speech_id += 1
+            my_id = speech_id if speech_id is not None else self._active_speech_id
+            self._current_speech_id = my_id
+            self._is_stopped = False
+            # Immediately abort and close any previous stream
+            if self._current_stream is not None:
+                try:
+                    self._current_stream.abort()
+                    self._current_stream.close()
+                except Exception:
+                    pass
+                self._current_stream = None
+
         config = self.model_config.get("inference", {}) if self.model_config else {}
         base_length = config.get("length_scale", 1.0)
         syn_config = SynthesisConfig(
@@ -324,17 +346,70 @@ class VoiceEngine:
         stream = None
         try:
             for chunk in self.voice.synthesize(cleaned_text, syn_config=syn_config):
+                # Terminate immediately if a newer speech ID took over or stop was called
+                if getattr(self, "_is_stopped", False) or getattr(self, "_current_speech_id", 0) != my_id:
+                    break
                 if stream is None:
-                    stream = sd.RawOutputStream(samplerate=chunk.sample_rate, channels=chunk.sample_channels, dtype="int16")
-                    stream.start()
-                stream.write(chunk.audio_int16_bytes)
+                    with self._speech_lock:
+                        if getattr(self, "_is_stopped", False) or getattr(self, "_current_speech_id", 0) != my_id:
+                            break
+                        stream = sd.RawOutputStream(
+                            samplerate=chunk.sample_rate,
+                            channels=chunk.sample_channels,
+                            dtype="int16"
+                        )
+                        self._current_stream = stream
+                        stream.start()
+
+                # Stream audio in small frame slices (2048 bytes ~46ms) so stops and cancellations take effect instantly
+                raw_bytes = chunk.audio_int16_bytes
+                chunk_slice_size = 2048
+                stopped_early = False
+                for offset in range(0, len(raw_bytes), chunk_slice_size):
+                    if getattr(self, "_is_stopped", False) or getattr(self, "_current_speech_id", 0) != my_id:
+                        stopped_early = True
+                        break
+                    slice_data = raw_bytes[offset:offset + chunk_slice_size]
+                    try:
+                        stream.write(slice_data)
+                    except Exception:
+                        stopped_early = True
+                        break
+
+                if stopped_early:
+                    break
         finally:
+            with self._speech_lock:
+                if getattr(self, "_current_stream", None) is stream:
+                    self._current_stream = None
             if stream is not None:
-                stream.stop()
-                stream.close()
+                try:
+                    if getattr(self, "_is_stopped", False) or getattr(self, "_current_speech_id", 0) != my_id:
+                        stream.abort()
+                    else:
+                        stream.stop()
+                    stream.close()
+                except Exception:
+                    pass
 
     def stop(self):
-        sd.stop()
+        """Immediately stops active voice synthesis and cancels any buffered playback."""
+        with self._speech_lock:
+            self._active_speech_id += 1
+            self._current_speech_id = self._active_speech_id
+            self._is_stopped = True
+            curr_stream = getattr(self, "_current_stream", None)
+            self._current_stream = None
+            if curr_stream is not None:
+                try:
+                    curr_stream.abort()
+                    curr_stream.close()
+                except Exception:
+                    pass
+            try:
+                sd.stop()
+            except Exception:
+                pass
 
 
 # Initialize default Speaker instance

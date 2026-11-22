@@ -1,5 +1,6 @@
 import html
 import json
+import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from user_profile.schemas import (
@@ -1352,6 +1353,113 @@ function renderStatus(data) {
     } else {
         loadPhonePinStatus();
     }
+
+    // 8. Assistant Video Animations (GUI Mode)
+    const animData = data.animations || {};
+    const animCardsContainer = document.getElementById('animationCardsContainer');
+    const animModeBadge = document.getElementById('animModeBadge');
+    if (animModeBadge) {
+        if (animData.gui_mode) {
+            animModeBadge.className = 'badge-online';
+            animModeBadge.textContent = '⚡ GUI Mode Active';
+        } else {
+            animModeBadge.className = 'badge-offline';
+            animModeBadge.textContent = '🔒 Disabled (Active in GUI mode via GUI_KAALU.bat)';
+        }
+    }
+    if (animCardsContainer && animData.available_animations && animData.available_animations.length > 0) {
+        let cardsHtml = '';
+        const activeAnim = animData.active_animation || '';
+        const isGui = Boolean(animData.gui_mode);
+        animData.available_animations.forEach(anim => {
+            const isActive = (anim === activeAnim);
+            const label = anim.replace('.mp4', '').replace(/[-_]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+            const disabledAttr = isGui ? '' : 'disabled';
+            const opacityStyle = isGui ? '' : 'opacity: 0.6; cursor: not-allowed;';
+            const clickHandler = isGui ? `selectAnimation('${anim}')` : 'void(0)';
+            cardsHtml += `
+                <div class="service-card ${isActive ? 'active' : ''}" style="${opacityStyle} margin-bottom: 0.5rem; flex: 1; min-width: 240px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <div>
+                            <div style="font-weight: 600; color: #f8fafc; font-size: 0.9rem;">🎬 ${label}</div>
+                            <div style="font-size: 0.75rem; color: #64748b; font-family: monospace;">${anim}</div>
+                        </div>
+                        <button type="button" class="btn ${isActive ? 'btn-primary' : 'btn-secondary'}"
+                                ${disabledAttr} onclick="${clickHandler}" style="font-size: 0.75rem; padding: 0.35rem 0.75rem;">
+                            ${isActive ? '✓ Active' : 'Select Animation'}
+                        </button>
+                    </div>
+                </div>
+            `;
+        });
+        animCardsContainer.innerHTML = cardsHtml;
+    }
+}
+
+async function selectAnimation(animName) {
+    try {
+        const resp = await fetch('/api/animations/select', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({animation: animName})
+        });
+        if (resp.ok) {
+            loadStatus();
+        } else {
+            const err = await resp.json();
+            alert('Error selecting animation: ' + (err.detail || 'Failed'));
+        }
+    } catch (e) {
+        alert('Network error: ' + e.message);
+    }
+}
+
+async function probeResumeBuilder() {
+    const btn = document.getElementById('probeRbBtn');
+    const badge = document.getElementById('rbStatusBadge');
+    const meta = document.getElementById('rbStatusMeta');
+    
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner"></span> Probing...';
+    }
+    if (badge) {
+        badge.className = 'badge-offline';
+        badge.innerHTML = '<span class="status-dot dot-gray"></span> Probing ports...';
+    }
+    if (meta) {
+        meta.innerHTML = 'Scanning candidate ports (5173, 5174, 8005) on localhost & 127.0.0.1...';
+    }
+    
+    try {
+        const resp = await fetch('/api/probe/resumebuilder');
+        if (!resp.ok) throw new Error('Probe returned HTTP ' + resp.status);
+        const rb = await resp.json();
+        if (badge && meta) {
+            if (rb.online) {
+                badge.className = 'badge-online';
+                badge.innerHTML = '<span class="status-dot dot-green"></span> Online (' + (rb.latency_ms || 0) + ' ms)';
+                meta.innerHTML = 'Status: <strong>Ready & Responding</strong> (HTTP ' + (rb.status_code || 200) + ')<br>URL: <a href="' + (rb.url || 'http://localhost:5173/') + '" target="_blank" style="color:#38bdf8;">' + (rb.url || 'http://localhost:5173/') + '</a>';
+                const openLink = document.getElementById('openRbLink');
+                if (openLink && rb.url) openLink.href = rb.url;
+            } else {
+                badge.className = 'badge-offline';
+                badge.innerHTML = '<span class="status-dot dot-red"></span> Offline';
+                meta.innerHTML = 'Status: <strong>Not Reachable</strong><br>Checked candidate ports 5173, 5174, 8005 on 127.0.0.1 & localhost.<br>To launch Resume Builder, run <code>start_with_RB.bat</code>.';
+            }
+        }
+    } catch (err) {
+        if (badge) {
+            badge.className = 'badge-offline';
+            badge.innerHTML = '<span class="status-dot dot-red"></span> Probe Failed';
+        }
+        if (meta) meta.innerHTML = 'Status: <strong>Probe error</strong> (' + err.message + ')';
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = '⚡ Probe Now';
+        }
+    }
 }
 
 async function sendAndroidKey(keyName, serial) {
@@ -2065,6 +2173,56 @@ def _get_settings_voice_info(status_data: Optional[Dict[str, Any]] = None) -> Tu
     return active_voice.upper(), "\n                ".join(voice_pills)
 
 
+def _get_settings_animation_info(status_data: Optional[Dict[str, Any]] = None) -> Tuple[str, str, bool]:
+    is_gui_mode = os.environ.get("KAALU_GUI_MODE") == "1"
+    anims_dir = Path(__file__).resolve().parent.parent.parent / "Animations"
+    available = []
+    if anims_dir.exists():
+        available = sorted([f.name for f in anims_dir.glob("*.mp4") if f.is_file()])
+    if not available:
+        available = ["jarvis-30-fps-1600x1600.mp4", "jarvis-blue.mp4"]
+
+    active_anim = "jarvis-30-fps-1600x1600.mp4"
+    if status_data and "animations" in status_data and status_data["animations"].get("active_animation"):
+        active_anim = str(status_data["animations"]["active_animation"])
+    else:
+        anim_cfg = Path(__file__).resolve().parent.parent / "data" / "animation_settings.json"
+        if anim_cfg.exists():
+            try:
+                with open(anim_cfg, "r", encoding="utf-8") as f:
+                    saved = json.load(f).get("active_animation")
+                    if saved and saved in available:
+                        active_anim = saved
+            except Exception:
+                pass
+
+    cards = []
+    for anim in available:
+        is_active = (anim == active_anim)
+        active_cls = " active" if is_active else ""
+        label = anim.replace(".mp4", "").replace("-", " ").replace("_", " ").title()
+        disabled_attr = "" if is_gui_mode else "disabled"
+        click_handler = f"selectAnimation('{html.escape(anim)}')" if is_gui_mode else "void(0)"
+        opacity_style = "" if is_gui_mode else "opacity: 0.6; cursor: not-allowed;"
+
+        cards.append(
+            f'<div class="service-card{active_cls}" style="{opacity_style} margin-bottom: 0.5rem; flex: 1; min-width: 240px;">'
+            f'  <div style="display: flex; justify-content: space-between; align-items: center;">'
+            f'    <div>'
+            f'      <div style="font-weight: 600; color: #f8fafc; font-size: 0.9rem;">🎬 {html.escape(label)}</div>'
+            f'      <div style="font-size: 0.75rem; color: #64748b; font-family: monospace;">{html.escape(anim)}</div>'
+            f'    </div>'
+            f'    <button type="button" class="btn {"btn-primary" if is_active else "btn-secondary"}" '
+            f'            {disabled_attr} onclick="{click_handler}" style="font-size: 0.75rem; padding: 0.35rem 0.75rem;">'
+            f'      {"✓ Active" if is_active else "Select Animation"}'
+            f'    </button>'
+            f'  </div>'
+            f'</div>'
+        )
+
+    return active_anim, "\n                ".join(cards), is_gui_mode
+
+
 def render_settings_page(
     status_data: Optional[Dict[str, Any]] = None,
     message: Optional[str] = None,
@@ -2082,6 +2240,7 @@ def render_settings_page(
         alert_html = f'<div class="alert alert-error"><span>✕</span> {error}</div>'
 
     active_voice_badge, voice_pills_html = _get_settings_voice_info(status_data)
+    active_anim, anim_cards_html, is_gui_mode = _get_settings_animation_info(status_data)
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -2160,10 +2319,10 @@ def render_settings_page(
                         </div>
                     </div>
                     <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem;">
-                        <a href="http://localhost:5173/" target="_blank" class="btn btn-secondary" style="font-size: 0.8rem; padding: 0.4rem 0.8rem;">
+                        <a href="http://localhost:5173/" id="openRbLink" target="_blank" class="btn btn-secondary" style="font-size: 0.8rem; padding: 0.4rem 0.8rem;">
                             🔗 Open Web App
                         </a>
-                        <button type="button" class="btn btn-secondary" onclick="loadStatus()" style="font-size: 0.8rem; padding: 0.4rem 0.8rem;">
+                        <button type="button" class="btn btn-secondary" id="probeRbBtn" onclick="probeResumeBuilder()" style="font-size: 0.8rem; padding: 0.4rem 0.8rem;">
                             ⚡ Probe Now
                         </button>
                     </div>
@@ -2327,6 +2486,26 @@ def render_settings_page(
             </div>
             <div style="font-size: 0.8rem; color: #64748b; background: #0b0f19; padding: 0.75rem; border-radius: 6px; border: 1px solid #1e293b;">
                 ⚡ <strong>Hardware Acceleration:</strong> Tensor Core 16-mixed precision enabled on CUDA. Audio cleaned via automated regex pipe stripping markdown symbols and raw file paths.
+            </div>
+        </div>
+
+        <!-- Section 5: Assistant Video Animations (GUI Mode) -->
+        <div class="card">
+            <div class="card-header-flex">
+                <div class="card-title">🎬 Visual Assistant Animations (Hologram Avatar)</div>
+                <div>
+                    <span style="font-size: 0.8rem; color: #94a3b8; margin-right: 0.5rem;">Mode:</span>
+                    <span id="animModeBadge" class="{'badge-online' if is_gui_mode else 'badge-offline'}" style="font-size: 0.75rem; padding: 0.2rem 0.6rem;">
+                        {'⚡ GUI Mode Active' if is_gui_mode else '🔒 Disabled (Active in GUI mode via GUI_KAALU.bat)'}
+                    </span>
+                </div>
+            </div>
+            <p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1rem;">
+                Select the MP4 video animation displayed in Tab 2 of the GUI. Animations are loaded dynamically from the <code>Animations/</code> directory.
+                {'' if is_gui_mode else '<br><strong style="color: #f59e0b;">Notice:</strong> Options are disabled because the system was launched via standard CLI script. Launch via <code>GUI_KAALU.bat</code> to enable live avatar animations.'}
+            </p>
+            <div id="animationCardsContainer" style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
+                {anim_cards_html}
             </div>
         </div>
 

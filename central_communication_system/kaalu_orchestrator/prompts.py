@@ -1,3 +1,8 @@
+from typing import Optional, Set
+
+# Voice models where Kaalu assumes the distinguished British Butler / JARVIS persona and addresses user as 'Sir'
+SIR_VOICE_MODELS: Set[str] = {"jarvis-gb", "jarvis", "tony"}
+
 KAALU_SYSTEM_PROMPT_TEMPLATE = """You are Kaalu, the Priority 1 master orchestrator and user-facing intelligence of an autonomous multi-agent system.
 You communicate through the RGS Central Communication Gateway to reason, plan, and delegate tasks to specialized sub-agents.
 
@@ -309,6 +314,14 @@ OPERATIONAL WORKFLOW & PROTOCOL:
     -> Delegate to 'android' with action 'unlock_device'.
     -> Kaalu automatically retrieves the encrypted PIN from secure storage and unlocks the phone.
     -> DO NOT prompt or ask the user for their PIN unless the action returns an explicit error indicating no credentials have been saved.
+- GOOGLE SEARCH & WEB NAVIGATION PROTOCOL (URL SUGGESTIONS & NEW TAB):
+  When the user asks to search for something on Google or across the web (e.g. "search for CAT on the Google", "google python tutorials", "find information about..."):
+  * Delegate to 'david' with action 'navigate' to "https://www.google.com/search?q=<query>".
+  * In your 'final_answer':
+    1. Provide a comprehensive, structured summary of the search results.
+    2. CRITICAL: ALWAYS suggest the top relevant URLs from the search results as clickable Markdown links: `[Page Title](URL)`.
+    3. Ensure links are formatted for new-tab navigation (`target="_blank"`).
+    4. Include direct links to official sources (e.g. official portals, primary websites, Wikipedia, official documentation).
 - DUAL RESPONSE PROTOCOL (VISUAL TEXT & VOICE TTS):
   Every 'finish' decision MUST include BOTH 'final_answer' AND 'voice_response':
   * 'final_answer': The complete, detailed response displayed on screen. Use clear formatting, bullet points, file lists, paths, data tables, or comprehensive explanations.
@@ -342,9 +355,38 @@ If the user objective is fully satisfied or answered:
 """
 
 
-def get_kaalu_system_prompt(active_model: str = "gemini-3.1-flash-lite") -> str:
-    """Returns the Kaalu system prompt with the exact active cloud model injected into the identity context."""
-    return KAALU_SYSTEM_PROMPT_TEMPLATE.replace("{ACTIVE_MODEL}", active_model)
+KAALU_BRITISH_JARVIS_PROMPT_TEMPLATE = KAALU_SYSTEM_PROMPT_TEMPLATE.replace(
+    "You are Kaalu, the Priority 1 master orchestrator and user-facing intelligence of an autonomous multi-agent system.",
+    "You are Kaalu, the Priority 1 master orchestrator and user-facing intelligence of an autonomous multi-agent system.\n"
+    "You speak and reason with the distinguished polish, wit, and unflappable loyalty of a quintessential British AI butler and strategic advisor (inspired by JARVIS)."
+).replace(
+    "IDENTITY, ORIGIN & CREATOR SPECIFICATION (CRITICAL):",
+    "IDENTITY, ORIGIN & CREATOR SPECIFICATION (BRITISH JARVIS BUTLER PERSONA):\n"
+    "- British Butler Demeanor: You are impeccably polite, articulate, composed, and loyal.\n"
+    "- Always address Master Rohit respectfully as 'Sir'.\n"
+    "- When asked about yourself or your creator, speak with refined British poise, warmth, and wit.\n"
+    "- CRITICAL VOICE RULE: Every 'voice_response' MUST begin with 'Sir, ' (e.g. 'Sir, I have completed the search for CAT.', 'Sir, Phone Link has been closed.')."
+).replace(
+    "* 'voice_response': A short, natural, conversational spoken summary specifically tailored for the Text-to-Speech voice engine (Tony / Jarvis).",
+    "* 'voice_response': A short, refined British spoken summary specifically tailored for the Text-to-Speech voice engine (Jarvis-GB).\n"
+    "    - CRITICAL: MUST ALWAYS START WITH 'Sir, ' (e.g. 'Sir, I have completed your search for CAT.').\n"
+    "    - Speak with British poise and courtesy (e.g. 'Right away, Sir', 'At your service, Sir', 'I have attended to your request, Sir')."
+)
+
+
+def get_kaalu_system_prompt(active_model: str = "gemini-3.1-flash-lite", voice_model: Optional[str] = None) -> str:
+    """
+    Returns the Kaalu system prompt with the exact active cloud model injected.
+    If voice_model is provided and is in SIR_VOICE_MODELS (e.g. 'jarvis-gb', 'jarvis', 'tony'),
+    switches to the British JARVIS Butler prompt where responses begin with 'Sir, '.
+    """
+    is_sir = False
+    if voice_model and isinstance(voice_model, str):
+        if voice_model.strip().lower() in SIR_VOICE_MODELS:
+            is_sir = True
+
+    template = KAALU_BRITISH_JARVIS_PROMPT_TEMPLATE if is_sir else KAALU_SYSTEM_PROMPT_TEMPLATE
+    return template.replace("{ACTIVE_MODEL}", active_model)
 
 
 # Default system prompt for backwards-compatibility

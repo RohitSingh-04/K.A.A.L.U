@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 import re
 import sys
+import threading
 from typing import Any, Dict, List, Optional
 try:
     from voice_system.tts import Speaker
@@ -382,21 +383,36 @@ class KaaluOrchestrator:
 
         return None
 
-    async def process_user_goal(self, goal: str) -> Dict[str, Any]:
+    async def process_user_goal(self, goal: str, step_callback: Optional[Any] = None) -> Dict[str, Any]:
         """
         Processes a high-level user goal using the RGS Central Intelligence
         and agent delegation ReAct loop (Think -> Act -> Observe).
         Maintains awareness of previous goals, directory listings, and file locations.
         """
         print(f"\n[Kaalu] Initiating User Objective: '{goal}'")
+        if step_callback:
+            try:
+                res = step_callback({"type": "start", "source": "kaalu", "goal": goal, "message": f"Initiating objective: '{goal}'"})
+                if asyncio.iscoroutine(res):
+                    await res
+            except Exception:
+                pass
 
         # 1. Ensure WebSocket connection to RGS Hub is established
         await self.ws_client.connect_server()
 
         # 2. Build conversation context with active cloud model injected into the system prompt
         active_model = self._detect_active_model()
+        voice_model = getattr(Speaker, "voice_name", None)
+        if not voice_model:
+            try:
+                from voice_system.tts import get_configured_voice
+                voice_model = get_configured_voice()
+            except Exception:
+                voice_model = "jarvis-gb"
+
         messages: List[Dict[str, str]] = [
-            {"role": "system", "content": get_kaalu_system_prompt(active_model)}
+            {"role": "system", "content": get_kaalu_system_prompt(active_model, voice_model=voice_model)}
         ]
 
         # Determine task type to dynamically optimize context and prevent TPM limit exhaustion
@@ -500,6 +516,20 @@ class KaaluOrchestrator:
             steps_taken += 1
             print(f"\n[Kaalu Step {steps_taken}/{self.max_steps}] Requesting reasoning from RGS Central LLM...")
 
+            if step_callback:
+                try:
+                    res = step_callback({
+                        "type": "step_start",
+                        "source": "kaalu",
+                        "step": steps_taken,
+                        "max_steps": self.max_steps,
+                        "message": f"Kaalu Step {steps_taken}/{self.max_steps}: Analyzing and reasoning..."
+                    })
+                    if asyncio.iscoroutine(res):
+                        await res
+                except Exception:
+                    pass
+
             try:
                 llm_response = await self.llm_client.generate_async(messages=messages)
             except Exception as llm_err:
@@ -532,13 +562,55 @@ class KaaluOrchestrator:
             action_type = decision.get("action")
             thought = decision.get("thought", "")
 
+            if step_callback:
+                try:
+                    res = step_callback({
+                        "type": "step",
+                        "source": "kaalu",
+                        "step": steps_taken,
+                        "max_steps": self.max_steps,
+                        "thought": thought,
+                        "action": action_type,
+                        "recipient": decision.get("recipient"),
+                        "task_action": decision.get("task_action"),
+                        "message": f"[Step {steps_taken}/{self.max_steps}] Thought: {thought[:140]}..."
+                    })
+                    if asyncio.iscoroutine(res):
+                        await res
+                except Exception:
+                    pass
+
             # A. Goal Completion
             if action_type == "finish":
                 final_answer = decision.get("final_answer", "Objective accomplished.")
                 voice_response = decision.get("voice_response") or final_answer
+
+                # Apply 'Sir, ' prefix for models in SIR_VOICE_MODELS (e.g. jarvis-gb)
+                from kaalu_orchestrator.prompts import SIR_VOICE_MODELS
+                v_model = getattr(Speaker, "voice_name", None) or "jarvis-gb"
+                if v_model.strip().lower() in SIR_VOICE_MODELS:
+                    if not voice_response.strip().lower().startswith("sir,"):
+                        voice_response = f"Sir, {voice_response.strip()}"
+
                 print(f"[Kaalu Finish] Objective successfully achieved:\n{final_answer}")
                 if decision.get("voice_response"):
                     print(f"[Kaalu Voice Response]: {voice_response}")
+
+                if step_callback:
+                    try:
+                        res = step_callback({
+                            "type": "finish",
+                            "source": "kaalu",
+                            "step": steps_taken,
+                            "max_steps": self.max_steps,
+                            "final_answer": final_answer,
+                            "voice_response": voice_response,
+                            "message": f"[Finished] {final_answer[:120]}..."
+                        })
+                        if asyncio.iscoroutine(res):
+                            await res
+                    except Exception:
+                        pass
 
                 # Persist this turn in conversation history for future turns
                 self.conversation_history.append({"role": "user", "content": goal})
@@ -562,6 +634,22 @@ class KaaluOrchestrator:
                 recipient = decision.get("recipient")
                 task_action = decision.get("task_action")
                 payload = decision.get("payload", {})
+
+                if step_callback:
+                    try:
+                        res = step_callback({
+                            "type": "delegate",
+                            "source": "kaalu",
+                            "step": steps_taken,
+                            "max_steps": self.max_steps,
+                            "recipient": recipient,
+                            "task_action": task_action,
+                            "message": f"Step {steps_taken}/{self.max_steps}: Delegating to '{recipient}' -> '{task_action}'..."
+                        })
+                        if asyncio.iscoroutine(res):
+                            await res
+                    except Exception:
+                        pass
 
                 # If delegating fill_form to David without fields specified, autofill from profile
                 if recipient == "david" and task_action == "fill_form" and not payload.get("fields") and self.profile_manager:
@@ -781,6 +869,22 @@ class KaaluOrchestrator:
 
                 print(f"[Kaalu] Observation from '{recipient}': {observation}")
 
+                if step_callback:
+                    try:
+                        res = step_callback({
+                            "type": "observation",
+                            "source": "kaalu",
+                            "step": steps_taken,
+                            "max_steps": self.max_steps,
+                            "recipient": recipient,
+                            "task_action": task_action,
+                            "message": f"Step {steps_taken}/{self.max_steps}: Received response from '{recipient}' for '{task_action}'"
+                        })
+                        if asyncio.iscoroutine(res):
+                            await res
+                    except Exception:
+                        pass
+
                 # Compact observation data before injecting into LLM context to prevent TPM rate limits
                 obs_for_llm = dict(observation) if isinstance(observation, dict) else {"result": observation}
                 obs_for_llm.pop("screenshot_base64", None)
@@ -885,7 +989,7 @@ class KaaluOrchestrator:
                 print("\n" + "=" * 40)
                 if Speaker is not None:
                     try:
-                        Speaker.speak(f"Sir, {voice_text}")
+                        Speaker.speak(f"{voice_text}")
                     except Exception as tts_err:
                         print(f"[Voice Warning] TTS playback failed: {tts_err}")
                 print(f"[Kaalu Final Result]:\n{final_answer_text}")
@@ -896,6 +1000,114 @@ class KaaluOrchestrator:
                 break
             except Exception as e:
                 print(f"\n[Kaalu Error encountered]: {e}")
+
+    async def run_gui_listener(self, ws_uri: str = "ws://localhost:8000/ws/kaalu_dispatch"):
+        """
+        Runs Kaalu Orchestrator in GUI agent mode, listening for goals dispatched from the GUI.
+        Activated when launched via GUI_KAALU.bat (KAALU_GUI_MODE=1).
+        Streams live reasoning steps to the GUI terminal and outputs visual Markdown & voice.
+        """
+        import websockets
+        print("=" * 60)
+        print("          KAALU MASTER ORCHESTRATOR (GUI MODE)")
+        print("  Connected to RGS Central Hub GUI Dispatcher.")
+        print("  Awaiting live voice and terminal objectives from GUI...")
+        print("=" * 60)
+
+        goal_seq = 0
+        latest_goal_id = 0
+        while True:
+            try:
+                async with websockets.connect(ws_uri, ping_interval=None) as ws:
+                    print(f"[Kaalu GUI Listener] Connected to {ws_uri}. Ready for user goals.")
+                    while True:
+                        msg_raw = await ws.recv()
+                        try:
+                            data = json.loads(msg_raw)
+                        except Exception:
+                            continue
+
+                        action = data.get("action")
+                        if action == "stop_voice":
+                            if Speaker is not None:
+                                Speaker.stop()
+                            continue
+
+                        if action == "user_goal":
+                            goal = data.get("goal") or data.get("payload", {}).get("goal", "")
+                            if not goal or not goal.strip():
+                                continue
+
+                            goal_seq += 1
+                            query_id = data.get("query_id")
+                            my_seq = query_id if query_id is not None else goal_seq
+                            latest_goal_id = max(latest_goal_id, my_seq)
+
+                            # Immediately silence any previous voice playback
+                            if Speaker is not None:
+                                Speaker.stop()
+
+                            print(f"\n[Kaalu GUI Listener] Received Goal [#{my_seq}]: '{goal}'")
+
+                            async def _execute_goal(this_goal, this_id, q_id):
+                                nonlocal latest_goal_id
+                                async def _gui_callback(event):
+                                    try:
+                                        event["recipient"] = "gui"
+                                        if q_id is not None:
+                                            event["query_id"] = q_id
+                                        event["goal_seq"] = this_id
+                                        await ws.send(json.dumps(event))
+                                    except Exception:
+                                        pass
+
+                                try:
+                                    result = await self.process_user_goal(this_goal, step_callback=_gui_callback)
+                                    final_answer_text = result.get('final_answer', str(result)) if isinstance(result, dict) else str(result)
+                                    voice_text = result.get('voice_response') if isinstance(result, dict) else None
+                                    if not voice_text:
+                                        voice_text = final_answer_text
+
+                                    is_still_latest = (this_id == latest_goal_id)
+
+                                    # Dispatch finish event to GUI
+                                    finish_data = {
+                                        "recipient": "gui",
+                                        "type": "finish",
+                                        "final_answer": final_answer_text,
+                                        "voice_response": voice_text,
+                                        "status": result.get("status", "completed"),
+                                        "goal_seq": this_id,
+                                        "is_latest": is_still_latest,
+                                        "superseded": not is_still_latest
+                                    }
+                                    if q_id is not None:
+                                        finish_data["query_id"] = q_id
+                                    await ws.send(json.dumps(finish_data))
+
+                                    # Speak voice response concurrently ONLY if this is still the latest goal
+                                    if is_still_latest and Speaker is not None:
+                                        try:
+                                            speak_text = voice_text if voice_text.strip().lower().startswith("sir,") else f"Sir, {voice_text}"
+                                            threading.Thread(target=Speaker.speak, args=(speak_text,), kwargs={"speech_id": this_id}, daemon=True).start()
+                                        except Exception as tts_err:
+                                            print(f"[Voice Warning] TTS playback failed: {tts_err}")
+                                    else:
+                                        print(f"[Kaalu GUI Listener] Goal [#{this_id}] finished but superseded by newer Goal [#{latest_goal_id}]. Voice output skipped.")
+                                except Exception as exec_err:
+                                    print(f"[Kaalu GUI Listener] Error in goal #{this_id}: {exec_err}")
+
+                            asyncio.create_task(_execute_goal(goal, my_seq, query_id))
+
+            except (websockets.ConnectionClosed, ConnectionRefusedError, OSError) as conn_err:
+                print(f"[Kaalu GUI Listener] Disconnected ({conn_err}). Retrying in 2s...")
+                await asyncio.sleep(2)
+            except (KeyboardInterrupt, asyncio.CancelledError):
+                print("\n[Kaalu GUI Listener] Shutting down.")
+                break
+            except Exception as e:
+                print(f"[Kaalu GUI Listener Error]: {e}")
+                await asyncio.sleep(2)
 
     async def close(self):
         """Clean up WebSocket client connection."""
