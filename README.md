@@ -37,39 +37,25 @@ Project KAALU uses a hub-and-spoke multi-agent architecture. **RGS (Runtime Gate
 
 
 ```
-
-                      +-----------------------------+
-
-                      |   RGS Central Hub (:8000)   |
-
-                      |  - FastAPI WebSocket Bus    |
-
-                      |  - LiteLLM Unified Gateway  |
-
-                      |  - System & Fleet Monitor   |
-
-                      +--------------+--------------+
-
-                                     |
-
-         +---------------------------+---------------------------+---------------------------+
-
-         |                           |                           |                           |
-
-         v                           v                           v                           v
-
-+------------------+       +-------------------+       +-------------------+       +-------------------+
-
-|      Kaalu       |       |     Faulkner      |       |       David       |       | Android Controller|
-
-|   Orchestrator   |       |   System Agent    |       |   Browser Agent   |       |   OnePlus Phone   |
-
-| (ReAct Engine &  |       | (Terminal, Shell, |       | (Chrome Ext V3,   |       | (Vision, Taps,    |
-
-|   Voice Synth)   |       |  Screen Capture)  |       |   Semantic DOM)   |       |  Typing, Gestures)|
-
-+------------------+       +-------------------+       +-------------------+       +-------------------+
-
+                                +-----------------------------+
+                                |   RGS Central Hub (:8000)   |
+                                |  - FastAPI WebSocket Bus    |
+                                |  - LiteLLM Unified Gateway  |
+                                |  - System & Fleet Monitor   |
+                                |  - 2-Tab GUI & Hologram Hub |
+                                +--------------+--------------+
+                                               |
+          +------------------------------------+------------------------------------+
+          |                     |                           |                       |
+          v                     v                           v                       v
+ +------------------+  +-------------------+       +-------------------+   +-------------------+
+ |  Kaalu Master    |  |  Faulkner         |       |   David           |   | Android Controller|
+ |  Orchestrator    |  |  System Agent     |       |   Browser Agent   |   |   OnePlus Phone   |
+ |  - ReAct Engine  |  |  - Windows Shell  |       |   - Chrome Ext V3 |   |   - Wireless TLS  |
+ |  - 2-Tab GUI     |  |  - Desktop Apps   |       |   - Semantic DOM  |   |   - Touch & Swipe |
+ |  - Voice Ears    |  |  - Screen Vision  |       |   - Form Filling  |   |   - Screen Vision |
+ |  - Hologram Ring |  |  - Process Guard  |       |   - Auto Navigate |   |   - Credential Pin|
+ +------------------+  +-------------------+       +-------------------+   +-------------------+
 ```
 
 
@@ -140,13 +126,15 @@ Project KAALU uses a hub-and-spoke multi-agent architecture. **RGS (Runtime Gate
 
 
 
-7\. ****Android Device Automation (`android_controller`)****:
+7. **Android Device Automation (`android_controller`)**:
+   - Native ADB-driven mobile automation supporting wireless TLS (`adb-tls-connect`) and USB.
+   - Automatic hardware recognition identifying the user's **OnePlus Phone** (`OnePlus Nord CE 2 5G / IV2201`, display `1080x2400 FHD+`, Android 13).
+   - High-speed direct binary screenshot capture (`screencap -p`), base64 visual analysis, touch coordinates, keyboard input, gestures, and shell commands.
 
-   - Native ADB-driven mobile automation supporting wireless TLS (`adb-tls-connect`) and USB.
-
-   - Automatic hardware recognition identifying the user's ****OnePlus Phone**** (`OnePlus Nord CE 2 5G / IV2201`, display `1080x2400 FHD+`, Android 13).
-
-   - High-speed direct binary screenshot capture (`screencap -p`), base64 visual analysis, touch coordinates, keyboard input, gestures, and shell commands.
+8. **Unified 2-Tab GUI & Hologram Interface (`/gui`)**:
+   - Next-generation desktop agent GUI launched via `GUI_KAALU.bat` (accessible at `http://localhost:8000/gui`).
+   - **Tab 1: Live Unified Terminal**: Full real-time stream of all multi-agent execution steps with category filters (`ALL`, `KAALU`, `FAULKNER`, `ANDROID`, `RGS HUB`), clipboard export, and interactive command execution prompt.
+   - **Tab 2: Visual Intelligence & Voice Ears**: Holographic video avatar with customizable MP4 animations (`Animations/`), continuous Web Speech API ears with automatic voice cutoff when the user speaks, synchronized typewriter voice subtitles, live step status badges (`STEP X/Y`), and persistent conversational chat history.
 
 
 
@@ -227,23 +215,33 @@ llm:
 
 ## Running the System
 
-You have two launch options:
+You have three launch options:
 
-### Option A: Complete System with Resume Builder (Recommended)
-Launches the full CareerForge AI Resume Builder (Vite frontend on `http://localhost:5173` and FastAPI backend on `http://localhost:8005`) together with Project Kaalu (RGS Central Hub on `:8000`, Faulkner System Agent, and Kaalu Master Orchestrator):
+### Option A: Interactive 2-Tab GUI Agent Interface (Visual Avatar & Voice Ears)
+Launches the full Project Kaalu GUI system in dedicated Chrome App mode (`http://localhost:8000/gui`), including RGS Central Hub (`:8000`), Faulkner System Agent, and Kaalu Master Orchestrator in GUI mode:
+
+```cmd
+.\GUI_KAALU.bat
+```
+
+- **Tab 1: Live Unified Terminal**: Full real-time stream of all multi-agent execution steps (Kaalu, Faulkner, David, Android, Hub) with category filters, auto-scroll, clear/copy actions, and interactive command execution.
+- **Tab 2: Visual Intelligence & Voice Ears**: Holographic video avatar with selectable MP4 animations (`Animations/`), continuous speech recognition ears with automatic voice cutoff when the user speaks, synchronized spoken typewriter subtitles, live step status badges (`STEP X/Y`), and persistent conversational chat history with Markdown formatting.
+
+### Option B: Complete System with AI Resume Builder (Web Application)
+Launches the CareerForge AI Resume Builder (Vite frontend on `http://localhost:5173` and FastAPI backend on `http://localhost:8005`) together with Project Kaalu (RGS Central Hub on `:8000`, Faulkner System Agent, and Kaalu terminal):
 
 ```cmd
 .\start_with_RB.bat
 ```
 
-### Option B: Project Kaalu Standalone
-Launches only the Project Kaalu agent ecosystem (RGS Hub `:8000`, Faulkner, and Kaalu terminal):
+### Option C: Project Kaalu Standalone CLI
+Launches the standard command-line Project Kaalu agent ecosystem (RGS Hub `:8000`, Faulkner, and Kaalu terminal):
 
 ```cmd
 .\start.bat
 ```
 
-*> **Note**: To grant Faulkner full process management permissions (such as closing elevated applications like Task Manager), right-click `start_with_RB.bat` or `start.bat` and choose **Run as administrator**.*
+> **Note**: To grant Faulkner full process management permissions (such as closing elevated applications like Task Manager), right-click `GUI_KAALU.bat`, `start_with_RB.bat`, or `start.bat` and choose **Run as administrator**.
 
 
 
@@ -493,33 +491,33 @@ Project KAALU features an integrated telemetry dashboard, with RGS (Runtime Gate
 
 ### Features
 
-\- ****Online Service Health Probing****: Real-time HTTP ping & latency probe of the Resume Builder (`http\://localhost:5173/`), RGS Central Gateway (`:8000`), and Central Job Storage.
+- **Hologram Avatar Animation Selector**: Dynamically scans the `Animations/` directory for MP4 video avatars (e.g. `jarvis-blue.mp4`, `holo-sphere.mp4`, `arc-reactor.mp4`), renders live looping preview cards, and allows dynamic switching of the active avatar on the fly (`POST /api/animations/select`). Active and responsive in GUI mode (`GUI_KAALU.bat`); gracefully labeled with tooltips in standard CLI mode.
 
-\- ****Connected Agent Fleet****: Live status indicator of all WebSocket-connected sub-agents:
+- **Online Service Health Probing**: Real-time HTTP ping & latency probe of the Resume Builder (`http://localhost:5173/`), RGS Central Gateway (`:8000`), and Central Job Storage, with a dedicated `⚡ Probe Now` button for instant connectivity verification.
 
-  - ****Kaalu****: Master Orchestrator (`/ws/kaalu`)
+- **Connected Agent Fleet**: Live status indicator of all WebSocket-connected sub-agents:
+  - **Kaalu**: Master Orchestrator (`/ws/kaalu` & `/ws/kaalu_dispatch`)
+  - **Faulkner**: Local System & Terminal Execution (`/ws/faulkner`)
+  - **David**: Chrome Extension V3 Browser Agent (`/ws/david`)
 
-  - ****Faulkner****: Local System & Terminal Execution (`/ws/faulkner`)
+- **Neural Voice Switcher & British Jarvis Model**: Live indicator of active voice (`jarvis-gb`, `jarvis`, `tony`), one-click voice switching, and instant audio synthesis tester (`🔊 Test Voice Audio`). In `jarvis-gb` mode, Kaalu takes on a polite British personality, phrasing spoken answers respectfully with *"Sir, ..."*.
 
-  - ****David****: Chrome Extension V3 Browser Agent (`/ws/david`)
+- **Instant Speech Interruption & Zero Overlap Protection**: Instant hardware-level audio cutoff (`POST /voice/stop`), ensuring Kaalu immediately ceases speaking when the user speaks into the microphone, and older background tasks never overlap audio with newer queries.
 
-\- ****Neural Voice Switcher****: Live indicator of active voice (`tony` or `jarvis`), one-click voice switching, and instant audio synthesis tester (`🔊 Test Voice Audio`).
+- **Gemini & LLM Model Configuration**: Displays active provider, active Gemini model (`gemini-3.1-flash-lite`), API key configuration status, and instant model switching dropdown.
 
-\- ****Gemini & LLM Model Configuration****: Displays active provider, active Gemini model (`gemini-3.1-flash-lite`), API key configuration status, and instant model switching dropdown.
+- **Connected Hardware & Mobile Devices (ADB)**: Live monitoring of connected Android hardware (e.g. OnePlus Phone), showing real-time battery level, display resolution, OS version, active app, and connection serial, with quick action controls (`📸 Capture Screenshot`, `🏠 Home`, `◀ Back`, `📋 Apps`) and a live screenshot modal.
 
-\- ****Connected Hardware & Mobile Devices (ADB)****: Live monitoring of connected Android hardware (e.g. OnePlus Phone), showing real-time battery level, display resolution, OS version, active app, and connection serial, with quick action controls (`📸 Capture Screenshot`, `🏠 Home`, `◀ Back`, `📋 Apps`) and a live screenshot modal.
-
-\- ****REST & Telemetry Endpoints****:
-
-  - `GET /settings`: Renders the full interactive monitoring dashboard.
-
-  - `GET /system/status` (or `GET /api/status`): Returns structured JSON telemetry for all agents, services, voice, and LLM configuration.
-
-  - `POST /voice/change` (or `POST /api/settings/voice`): Switches active voice model in real-time.
-
-  - `POST /voice/test`: Synthesizes a test phrase using the active voice.
-
-  - `POST /llm/change` (or `POST /api/settings/llm`): Dynamically updates default LLM model/provider.
+- **REST & Telemetry Endpoints**:
+  - `GET /settings`: Renders the full interactive monitoring dashboard.
+  - `GET /system/status` (or `GET /api/status`): Returns structured JSON telemetry for all agents, services, voice, and LLM configuration.
+  - `GET /api/animations`: Lists discovered MP4 animations and active selection.
+  - `POST /api/animations/select`: Dynamically updates active hologram video avatar.
+  - `POST /voice/stop` (or `POST /api/voice/stop`): Halts active neural voice playback across all agent processes instantly.
+  - `GET /api/probe/resumebuilder`: Performs live HTTP ping and returns latency ms for Resume Builder.
+  - `POST /voice/change` (or `POST /api/settings/voice`): Switches active voice model in real-time.
+  - `POST /voice/test`: Synthesizes a test phrase using the active voice.
+  - `POST /llm/change` (or `POST /api/settings/llm`): Dynamically updates default LLM model/provider.
 
 
 
